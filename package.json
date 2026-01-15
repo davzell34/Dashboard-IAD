@@ -10,21 +10,11 @@
     "lucide-react": "latest",
     "recharts": "^2.10.0"
   },
-  "overrides": {
-    "ajv": "^8.17.1",
-    "ajv-keywords": "^5.1.0"
-  },
   "scripts": {
     "start": "react-scripts start",
     "build": "CI=false react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
-  },
-  "eslintConfig": {
-    "extends": [
-      "react-app",
-      "react-app/jest"
-    ]
   },
   "browserslist": {
     "production": [
