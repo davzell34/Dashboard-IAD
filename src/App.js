@@ -107,6 +107,9 @@ function MigrationDashboard() {
   const [isDetailListExpanded, setIsDetailListExpanded] = useState(true);
   const [showPlanning, setShowPlanning] = useState(false); 
 
+  // ... tes autres useState ...
+  const [debugData, setDebugData] = useState(null); 
+
 // --- AJOUT SÉCURITÉ & CONNEXION ---
   const { getToken } = useAuth(); // On récupère l'outil pour générer le token
 
@@ -132,6 +135,7 @@ function MigrationDashboard() {
 
         const json = await response.json();
         console.log("✅ Données reçues de Snowflake :", json);
+        setDebugData(json);
 
         // QUAND TU SERAS PRÊT À UTILISER LES DONNÉES SNOWFLAKE :
         // Tu pourras décommenter et adapter les lignes ci-dessous pour remplir le tableau :
@@ -552,7 +556,16 @@ function MigrationDashboard() {
   // --- RENDER : TABLEAU DE BORD ---
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500">
-      
+      {/* --- ZONE DE DEBUG TEMPORAIRE (A supprimer plus tard) --- */}
+      {debugData && (
+        <div className="bg-gray-800 text-green-400 p-4 m-4 rounded font-mono text-xs overflow-auto max-h-60 border-2 border-green-500 shadow-xl">
+            <h3 className="font-bold text-white mb-2 text-sm border-b border-gray-600 pb-1">
+                📡 TEST CONNEXION SNOWFLAKE SÉCURISÉE
+            </h3>
+            <pre>{JSON.stringify(debugData, null, 2)}</pre>
+        </div>
+      )}
+      {/* ------------------------------------------------------- */}
       {/* HEADER */}
       <header className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
         <div className="flex items-center gap-3">
