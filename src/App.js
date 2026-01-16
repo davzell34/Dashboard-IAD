@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   LineChart, Line, AreaChart, Area, ComposedChart, ReferenceLine, RadialBarChart, RadialBar
@@ -7,7 +7,7 @@ import {
   Activity, Users, Clock, TrendingUp, AlertTriangle, CheckCircle, 
   Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Upload, FileSpreadsheet, Loader
 } from 'lucide-react';
-import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser } from "@clerk/clerk-react";
+import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
 // --- CONFIGURATION ---
 const TECH_LIST_DEFAULT = ["Jean-Philippe SAUROIS", "Jean-michel MESSIN", "Mathieu GROSSI", "Roderick GAMONDES", "Zakaria AYAT"];
 const clerkPubKey = process.env.REACT_APP_CLERK_PUBLISHABLE_KEY;
@@ -107,6 +107,51 @@ function MigrationDashboard() {
   const [isDetailListExpanded, setIsDetailListExpanded] = useState(true);
   const [showPlanning, setShowPlanning] = useState(false); 
 
+// --- AJOUT SÉCURITÉ & CONNEXION ---
+  const { getToken } = useAuth(); // On récupère l'outil pour générer le token
+
+  useEffect(() => {
+    const fetchData = async () => {
+      // Pour l'instant, on log juste dans la console pour vérifier que la sécu marche
+      // sans écraser tes données CSV si tu t'en sers encore.
+      console.log("🔒 Tentative de connexion sécurisée...");
+
+      try {
+        // 1. On demande le badge (Token) à Clerk
+        const token = await getToken();
+        
+        // 2. On appelle l'API en attachant le badge
+        const response = await fetch('/api/getData', {
+          headers: {
+            Authorization: `Bearer ${token}` // C'est ici que la magie opère
+          }
+        });
+
+        if (response.status === 401) throw new Error("Accès refusé par l'API (401)");
+        if (!response.ok) throw new Error("Erreur réseau");
+
+        const json = await response.json();
+        console.log("✅ Données reçues de Snowflake :", json);
+
+        // QUAND TU SERAS PRÊT À UTILISER LES DONNÉES SNOWFLAKE :
+        // Tu pourras décommenter et adapter les lignes ci-dessous pour remplir le tableau :
+        
+        /*
+        const data = json.data || [];
+        // Exemple d'adaptation (Vérifie les noms de colonnes dans ta console !)
+        const backData = data.filter(row => row['SOURCE'] === 'BACKOFFICE');
+        setBackofficeData(backData);
+        setIsDataLoaded(true);
+        */
+
+      } catch (err) {
+        console.error("❌ Erreur API :", err);
+      }
+    };
+
+    fetchData();
+  }, [getToken]);
+  
   // --- LOGIQUE D'IMPORTATION INTELLIGENTE ---
 
   const handleSmartUpload = (event) => {
