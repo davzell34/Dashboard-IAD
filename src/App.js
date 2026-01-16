@@ -5,79 +5,69 @@ import {
 } from 'recharts';
 import { 
   Activity, Users, Clock, TrendingUp, AlertTriangle, CheckCircle, 
-  Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase
+  Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Upload, FileSpreadsheet, Loader
 } from 'lucide-react';
 
-/**
- * DONNÉES AGRÉGÉES (12 mois glissants : Sept 2025 - Août 2026)
- * Règles de calcul :
- * - Besoin (Bleu) : 1h + 10min/user > 5 (Analyses nouvelles + Migrations Adwin)
- * - Besoin Encours (Rouge) : 1h/dossier non "Prêt" (J+7)
- * - Capacité (Vert) : Heures planifiées en Backoffice
- */
-const DETAILED_DATA = [
-  { "month": "2025-09", "tech": "Jean-Philippe SAUROIS", "besoin": 5.0, "besoin_encours": 0.0, "capacite": 15.25 },
-  { "month": "2025-09", "tech": "Jean-michel MESSIN", "besoin": 15.0, "besoin_encours": 0.0, "capacite": 34.0 },
-  { "month": "2025-09", "tech": "Mathieu GROSSI", "besoin": 12.0, "besoin_encours": 0.0, "capacite": 27.0 },
-  { "month": "2025-09", "tech": "Roderick GAMONDES", "besoin": 17.33, "besoin_encours": 0.0, "capacite": 29.0 },
-  { "month": "2025-09", "tech": "Zakaria AYAT", "besoin": 11.17, "besoin_encours": 0.0, "capacite": 28.0 },
-  { "month": "2025-10", "tech": "Jean-Philippe SAUROIS", "besoin": 14.67, "besoin_encours": 0.0, "capacite": 18.5 },
-  { "month": "2025-10", "tech": "Jean-michel MESSIN", "besoin": 7.0, "besoin_encours": 0.0, "capacite": 29.5 },
-  { "month": "2025-10", "tech": "Mathieu GROSSI", "besoin": 15.0, "besoin_encours": 0.0, "capacite": 44.25 },
-  { "month": "2025-10", "tech": "Roderick GAMONDES", "besoin": 20.83, "besoin_encours": 0.0, "capacite": 37.5 },
-  { "month": "2025-10", "tech": "Zakaria AYAT", "besoin": 7.0, "besoin_encours": 0.0, "capacite": 36.75 },
-  { "month": "2025-11", "tech": "Jean-Philippe SAUROIS", "besoin": 9.67, "besoin_encours": 0.0, "capacite": 15.5 },
-  { "month": "2025-11", "tech": "Jean-michel MESSIN", "besoin": 14.0, "besoin_encours": 5.0, "capacite": 30.0 },
-  { "month": "2025-11", "tech": "Mathieu GROSSI", "besoin": 12.17, "besoin_encours": 0.0, "capacite": 31.75 },
-  { "month": "2025-11", "tech": "Roderick GAMONDES", "besoin": 12.0, "besoin_encours": 2.0, "capacite": 30.25 },
-  { "month": "2025-11", "tech": "Zakaria AYAT", "besoin": 4.5, "besoin_encours": 0.0, "capacite": 27.0 },
-  { "month": "2025-12", "tech": "Jean-Philippe SAUROIS", "besoin": 14.17, "besoin_encours": 0.0, "capacite": 13.0 },
-  { "month": "2025-12", "tech": "Jean-michel MESSIN", "besoin": 19.0, "besoin_encours": 6.0, "capacite": 43.75 },
-  { "month": "2025-12", "tech": "Mathieu GROSSI", "besoin": 12.0, "besoin_encours": 0.0, "capacite": 17.5 },
-  { "month": "2025-12", "tech": "Roderick GAMONDES", "besoin": 35.33, "besoin_encours": 4.0, "capacite": 39.75 },
-  { "month": "2025-12", "tech": "Zakaria AYAT", "besoin": 8.0, "besoin_encours": 0.0, "capacite": 33.0 },
-  { "month": "2026-01", "tech": "Jean-Philippe SAUROIS", "besoin": 11.0, "besoin_encours": 0.0, "capacite": 30.0 },
-  { "month": "2026-01", "tech": "Jean-michel MESSIN", "besoin": 16.0, "besoin_encours": 0.0, "capacite": 40.75 },
-  { "month": "2026-01", "tech": "Mathieu GROSSI", "besoin": 15.0, "besoin_encours": 0.0, "capacite": 44.5 },
-  { "month": "2026-01", "tech": "Roderick GAMONDES", "besoin": 9.17, "besoin_encours": 3.0, "capacite": 32.75 },
-  { "month": "2026-01", "tech": "Zakaria AYAT", "besoin": 13.0, "besoin_encours": 0.0, "capacite": 41.5 },
-  { "month": "2026-02", "tech": "Jean-Philippe SAUROIS", "besoin": 0.0, "besoin_encours": 0.0, "capacite": 16.0 },
-  { "month": "2026-02", "tech": "Jean-michel MESSIN", "besoin": 3.0, "besoin_encours": 0.0, "capacite": 30.0 },
-  { "month": "2026-02", "tech": "Mathieu GROSSI", "besoin": 1.0, "besoin_encours": 0.0, "capacite": 30.0 },
-  { "month": "2026-02", "tech": "Roderick GAMONDES", "besoin": 1.0, "besoin_encours": 0.0, "capacite": 30.0 },
-  { "month": "2026-02", "tech": "Zakaria AYAT", "besoin": 1.0, "besoin_encours": 0.0, "capacite": 28.0 },
-  { "month": "2026-03", "tech": "Jean-Philippe SAUROIS", "besoin": 0.0, "besoin_encours": 0.0, "capacite": 16.0 },
-  { "month": "2026-03", "tech": "Jean-michel MESSIN", "besoin": 0.0, "besoin_encours": 0.0, "capacite": 30.0 },
-  { "month": "2026-03", "tech": "Mathieu GROSSI", "besoin": 0.0, "besoin_encours": 0.0, "capacite": 34.0 },
-  { "month": "2026-03", "tech": "Roderick GAMONDES", "besoin": 0.0, "besoin_encours": 0.0, "capacite": 30.0 },
-  { "month": "2026-03", "tech": "Zakaria AYAT", "besoin": 0.0, "besoin_encours": 0.0, "capacite": 28.0 }
-];
+// --- CONFIGURATION ---
+const TECH_LIST_DEFAULT = ["Jean-Philippe SAUROIS", "Jean-michel MESSIN", "Mathieu GROSSI", "Roderick GAMONDES", "Zakaria AYAT"];
 
-const TECH_LIST = ["Jean-Philippe SAUROIS", "Jean-michel MESSIN", "Mathieu GROSSI", "Roderick GAMONDES", "Zakaria AYAT"];
-const PLANNING_COUNT = 18; 
+// --- UTILITAIRES ---
 
-// --- LISTE ÉVÉNEMENTS ---
-// Couleurs : Green (Prod), Blue (Besoin), Red (En cours), Indigo (Planning)
-const EVENTS_DATA = [
-  // ... (Pipe Planning - Indigo)
-  {"date": "N/A", "tech": "Roderick GAMONDES", "client": "GIRERD Pauline", "type": "Prêt pour Mise en Place", "duration": 0, "status": "A Planifier", "color": "indigo"},
-  {"date": "N/A", "tech": "Jean-michel MESSIN", "client": "NORA CHATI", "type": "Prêt pour Mise en Place", "duration": 0, "status": "A Planifier", "color": "indigo"},
-  // ... (Liste tronquée pour l'exemple, contient tous les éléments "Prêt")
+const normalizeTechName = (name, techList) => {
+  if (!name || typeof name !== 'string') return "Inconnu";
+  const cleanName = name.trim();
+  const upperName = cleanName.toUpperCase();
   
-  // ... (Opérations Datées - Green/Blue/Red)
-  {"date": "2026-03-30", "tech": "Mathieu GROSSI", "client": "GROSSI Mathieu", "type": "Tache de backoffice Avocatmail", "duration": 4.0, "status": "Production (Backoffice)", "color": "green"},
-  {"date": "2026-02-06", "tech": "Roderick GAMONDES", "client": "MARION VIVIEN", "type": "Avocatmail - Analyse", "duration": 1.0, "status": "Besoin (Analyse/Migr)", "color": "blue"},
-  {"date": "2025-12-23", "tech": "Jean-michel MESSIN", "client": "SCP GRANGIE & ASSOCIES - NOTAIRES", "type": "Analyse (En cours)", "duration": 1.0, "status": "En attente (Encours)", "color": "red"},
-  // ... (Liste complète des événements dans l'application réelle)
-];
+  for (const tech of techList) {
+    if (tech.toUpperCase() === upperName) return tech;
+    const lastName = tech.split(' ').pop().toUpperCase();
+    if (upperName.includes(lastName)) return tech;
+  }
+  return cleanName;
+};
 
-// Formatter de date (YYYY-MM -> MMM YY)
 const formatMonth = (dateStr) => {
   if (!dateStr) return '';
   const [year, month] = dateStr.split('-');
   const date = new Date(parseInt(year), parseInt(month) - 1, 1);
   return date.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
 };
+
+// Fonction simple pour parser un CSV (séparateur , ou ;)
+const parseCSV = (text) => {
+  if (!text) return [];
+  const lines = text.split(/\r\n|\n/).filter(l => l.trim());
+  if (lines.length < 2) return [];
+
+  // Détection du séparateur (virgule ou point-virgule)
+  const firstLine = lines[0];
+  const separator = firstLine.includes(';') ? ';' : ',';
+
+  const headers = firstLine.split(separator).map(h => h.trim().replace(/"/g, ''));
+  
+  return lines.slice(1).map(line => {
+    // Gestion basique des guillemets
+    const regex = new RegExp(`(?:${separator}|\\r?\\n|^)(?:"([^"]*)"|([^"${separator}]*))`, 'g');
+    const values = [];
+    let match;
+    while ((match = regex.exec(line))) {
+       // match[1] is quoted value, match[2] is unquoted
+       values.push(match[1] ? match[1] : match[2]); 
+    }
+    // Fallback simple split si regex échoue ou trop complexe
+    const simpleValues = line.split(separator).map(val => val.trim().replace(/^"|"$/g, ''));
+    
+    // On utilise simpleValues si le compte correspond, sinon on essaie de mapper au mieux
+    const dataRow = simpleValues.length === headers.length ? simpleValues : values;
+
+    return headers.reduce((obj, header, index) => {
+      obj[header] = dataRow[index] || '';
+      return obj;
+    }, {});
+  });
+};
+
+// --- COMPOSANTS UI ---
 
 const KPICard = ({ title, value, subtext, icon: Icon, colorClass, active, onClick }) => (
   <div 
@@ -97,21 +87,262 @@ const KPICard = ({ title, value, subtext, icon: Icon, colorClass, active, onClic
   </div>
 );
 
+// --- APPLICATION PRINCIPALE ---
+
 export default function MigrationDashboard() {
+  // États des données (Initialisés vides)
+  const [backofficeData, setBackofficeData] = useState([]);
+  const [encoursData, setEncoursData] = useState([]);
+  const [techList, setTechList] = useState(TECH_LIST_DEFAULT);
+  
+  // États de chargement
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // États de l'interface
   const [selectedTech, setSelectedTech] = useState('Tous');
   const [selectedMonth, setSelectedMonth] = useState(null);
   const [isTableExpanded, setIsTableExpanded] = useState(false); 
   const [isDetailListExpanded, setIsDetailListExpanded] = useState(true);
   const [showPlanning, setShowPlanning] = useState(false); 
 
-  // Filtrage des données
-  const filteredRawData = useMemo(() => {
-    if (selectedTech === 'Tous') return DETAILED_DATA;
-    return DETAILED_DATA.filter(d => d.tech === selectedTech);
-  }, [selectedTech]);
+  // --- LOGIQUE D'IMPORTATION INTELLIGENTE ---
 
-  // Agrégation par mois
+  const handleSmartUpload = (event) => {
+    const files = Array.from(event.target.files);
+    if (files.length === 0) return;
+
+    setLoadingMsg("Analyse des fichiers en cours...");
+    setErrorMsg('');
+    
+    let newBackofficeData = [];
+    let newEncoursData = [];
+    let foundBackoffice = false;
+    let foundEncours = false;
+
+    // Compteur pour savoir quand tous les fichiers sont lus
+    let filesRead = 0;
+
+    files.forEach(file => {
+      const reader = new FileReader();
+      
+      reader.onload = (e) => {
+        try {
+          const text = e.target.result;
+          const jsonData = parseCSV(text);
+
+          if (jsonData.length > 0) {
+            // Détection automatique du type de fichier via les colonnes
+            const columns = Object.keys(jsonData[0]);
+            
+            // Fichier Backoffice contient généralement "Evènement"
+            if (columns.some(c => c.includes('Evènement') || c.includes('Evenement') || c.includes('Dossier'))) {
+              newBackofficeData = jsonData;
+              foundBackoffice = true;
+            } 
+            // Fichier Encours contient "Interlocuteur"
+            else if (columns.some(c => c.includes('Interlocuteur') || c.includes('Catégorie') || c.includes('Client'))) {
+              newEncoursData = jsonData;
+              foundEncours = true;
+            }
+          }
+        } catch (err) {
+          console.error("Erreur parsing", err);
+        } finally {
+          filesRead++;
+          // Vérification finale une fois tous les fichiers lus
+          if (filesRead === files.length) {
+            if (foundBackoffice || foundEncours) {
+              if (foundBackoffice) setBackofficeData(newBackofficeData);
+              if (foundEncours) setEncoursData(newEncoursData);
+              
+              // Mise à jour de la liste des techniciens
+              const techs = new Set();
+              if (foundBackoffice) {
+                newBackofficeData.forEach(row => {
+                  if (row['Responsable']) techs.add(normalizeTechName(row['Responsable'], TECH_LIST_DEFAULT));
+                });
+              }
+              if (foundEncours) {
+                newEncoursData.forEach(row => {
+                  if (row['Interlocuteur']) techs.add(normalizeTechName(row['Interlocuteur'], TECH_LIST_DEFAULT));
+                });
+              }
+              if (techs.size > 0) setTechList(Array.from(techs).sort());
+              
+              setIsDataLoaded(true);
+              setLoadingMsg('');
+            } else {
+              setErrorMsg("Impossible d'identifier les fichiers. Vérifiez qu'il s'agit bien de fichiers CSV valides avec les bonnes colonnes.");
+              setLoadingMsg('');
+            }
+          }
+        }
+      };
+      reader.readAsText(file); // Lecture en texte pour CSV
+    });
+  };
+
+  // --- TRAITEMENT DES DONNÉES (Core Logic) ---
+
+  const { detailedData, eventsData, planningCount } = useMemo(() => {
+    if (!isDataLoaded) return { detailedData: [], eventsData: [], planningCount: 0 };
+
+    const events = [];
+    const planningEventsList = [];
+    const monthlyStats = new Map();
+
+    // 1. Traitement Backoffice
+    backofficeData.forEach(row => {
+      // Nettoyage des clés (parfois des espaces invisibles dans les headers CSV)
+      const cleanRow = {};
+      Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
+
+      if (!['Avocatmail - Analyse', 'Migration messagerie Adwin', 'Tache de backoffice Avocatmail'].includes(cleanRow['Evènement'])) return;
+      
+      let dateStr = cleanRow['Date']; 
+      if (!dateStr) return;
+      
+      // Tentative de parsing date format YYYY-MM-DD ou DD/MM/YYYY
+      if (dateStr.includes('/')) {
+         const parts = dateStr.split(' ')[0].split('/');
+         if (parts.length === 3) dateStr = `${parts[2]}-${parts[1]}-${parts[0]}`; // Convertir DD/MM/YYYY en YYYY-MM-DD
+      }
+      
+      const month = dateStr.substring(0, 7);
+      const tech = normalizeTechName(cleanRow['Responsable'], techList);
+      
+      // Calcul Durée
+      let duration = 0;
+      const dureeStr = cleanRow['Durée'];
+      if (dureeStr && dureeStr.includes(':')) {
+        const [h, m, s] = dureeStr.split(':').map(Number);
+        duration = (h || 0) + (m || 0)/60;
+      } else if (dureeStr) {
+          duration = parseFloat(dureeStr.replace(',', '.')) || 0;
+      }
+
+      // Règles de calcul
+      let besoin = 0;
+      let capacite = 0;
+      let color = 'gray';
+      let status = '';
+
+      if (cleanRow['Evènement'] === 'Tache de backoffice Avocatmail') {
+        capacite = duration;
+        color = 'purple';
+        status = 'Production (Backoffice)';
+      } else {
+        const users = parseInt(cleanRow['users'] || '1', 10);
+        besoin = 1.0;
+        if (users > 5) besoin += (users - 5) * (10/60);
+        color = 'cyan';
+        status = 'Besoin (Analyse/Migr)';
+      }
+
+      const key = `${month}_${tech}`;
+      if (!monthlyStats.has(key)) {
+        monthlyStats.set(key, { month, tech, besoin: 0, besoin_encours: 0, capacite: 0 });
+      }
+      const entry = monthlyStats.get(key);
+      entry.besoin += besoin;
+      entry.capacite += capacite;
+
+      events.push({
+        date: dateStr,
+        tech,
+        client: cleanRow['Dossier'] || cleanRow['Libellé'] || 'Client Inconnu',
+        type: cleanRow['Evènement'],
+        duration: Math.max(besoin, capacite),
+        status,
+        color
+      });
+    });
+
+    // 2. Traitement Encours
+    encoursData.forEach(row => {
+        const cleanRow = {};
+        Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
+
+        const tech = normalizeTechName(cleanRow['Interlocuteur'], techList);
+        const category = cleanRow['Catégorie'];
+        let lastActionDateStr = cleanRow['Dernière action'];
+        
+        // Planning (Indigo)
+        if (category === 'Prêt pour mise en place') {
+            planningEventsList.push({
+                date: "N/A",
+                tech,
+                client: cleanRow['Client'] || 'Client Inconnu',
+                type: "Prêt pour Mise en Place",
+                duration: 0,
+                status: "A Planifier",
+                color: "indigo"
+            });
+            return;
+        }
+
+        // En cours (Orange/Amber)
+        if (lastActionDateStr) {
+             // Parsing date DD/MM/YYYY ou YYYY-MM-DD
+            if (lastActionDateStr.includes('/')) {
+                const parts = lastActionDateStr.split(' ')[0].split('/');
+                if (parts.length === 3) lastActionDateStr = `${parts[2]}-${parts[1]}-${parts[0]}`;
+            }
+            
+            const lastDate = new Date(lastActionDateStr);
+            if (!isNaN(lastDate.getTime())) {
+                const targetDate = new Date(lastDate);
+                targetDate.setDate(targetDate.getDate() + 7); // J+7
+                const targetDateStr = targetDate.toISOString().split('T')[0];
+                const targetMonth = targetDateStr.substring(0, 7);
+
+                const key = `${targetMonth}_${tech}`;
+                if (!monthlyStats.has(key)) {
+                    monthlyStats.set(key, { month: targetMonth, tech, besoin: 0, besoin_encours: 0, capacite: 0 });
+                }
+                const entry = monthlyStats.get(key);
+                entry.besoin_encours += 1.0;
+
+                events.push({
+                    date: targetDateStr,
+                    tech,
+                    client: cleanRow['Client'] || 'Client Inconnu',
+                    type: "Analyse (En cours)",
+                    duration: 1.0,
+                    status: "En attente (Encours)",
+                    color: "amber"
+                });
+            }
+        }
+    });
+
+    const detailedDataArray = Array.from(monthlyStats.values()).sort((a, b) => a.month.localeCompare(b.month));
+    const allEvents = [...planningEventsList, ...events.sort((a, b) => b.date.localeCompare(a.date))];
+
+    return {
+        detailedData: detailedDataArray,
+        eventsData: allEvents,
+        planningCount: planningEventsList.length
+    };
+  }, [backofficeData, encoursData, isDataLoaded, techList]);
+
+  // --- LOGIQUE D'AFFICHAGE ---
+
+  const filteredRawData = useMemo(() => {
+    if (selectedTech === 'Tous') return detailedData;
+    return detailedData.filter(d => d.tech === selectedTech);
+  }, [selectedTech, detailedData]);
+
   const monthlyAggregatedData = useMemo(() => {
+    if (!isDataLoaded || detailedData.length === 0) return [];
+    
+    // Plage dynamique basée sur les données chargées
+    const allMonths = detailedData.map(d => d.month).sort();
+    const startMonthStr = allMonths[0] || '2025-01';
+    const endMonthStr = allMonths[allMonths.length - 1] || '2026-12';
+    
     const aggMap = new Map();
     filteredRawData.forEach(item => {
       if (!aggMap.has(item.month)) aggMap.set(item.month, { month: item.month, besoin: 0, besoin_encours: 0, capacite: 0 });
@@ -121,46 +352,41 @@ export default function MigrationDashboard() {
       entry.capacite += item.capacite;
     });
 
-    const fullRange = [];
-    const startYear = 2025;
-    const startMonthIdx = 9; 
-
-    for(let i=0; i<12; i++) {
-        const date = new Date(startYear, startMonthIdx - 1 + i, 1);
-        const y = date.getFullYear();
-        const m = String(date.getMonth() + 1).padStart(2, '0');
-        fullRange.push(`${y}-${m}`);
-    }
+    let current = new Date(startMonthStr + '-01');
+    const end = new Date(endMonthStr + '-01');
+    if (current > end) return [];
     
+    const result = [];
     let cumulBesoin = 0;
     let cumulCapacite = 0;
-    
-    return fullRange.map(month => {
-      const data = aggMap.get(month) || { month, besoin: 0, besoin_encours: 0, capacite: 0 };
-      const totalBesoinMois = data.besoin + data.besoin_encours;
-      cumulBesoin += totalBesoinMois;
-      cumulCapacite += data.capacite;
 
-      return {
-        ...data,
-        formattedMonth: formatMonth(month),
-        totalBesoinMois,
-        cumulBesoin,
-        cumulCapacite,
-        soldeMensuel: data.capacite - totalBesoinMois,
-        soldeCumule: cumulCapacite - cumulBesoin
-      };
-    });
-  }, [filteredRawData]);
+    while (current <= end) {
+        const mStr = current.toISOString().substring(0, 7);
+        const data = aggMap.get(mStr) || { month: mStr, besoin: 0, besoin_encours: 0, capacite: 0 };
+        
+        const totalBesoinMois = data.besoin + data.besoin_encours;
+        cumulBesoin += totalBesoinMois;
+        cumulCapacite += data.capacite;
 
-  // Agrégation par technicien
+        result.push({
+            ...data,
+            formattedMonth: formatMonth(mStr),
+            totalBesoinMois,
+            cumulBesoin,
+            cumulCapacite,
+            soldeMensuel: data.capacite - totalBesoinMois,
+            soldeCumule: cumulCapacite - cumulBesoin
+        });
+        current.setMonth(current.getMonth() + 1);
+    }
+    return result;
+  }, [filteredRawData, isDataLoaded, detailedData]);
+
   const techAggregatedData = useMemo(() => {
     const aggMap = new Map();
-    const monthsOfInterest = new Set(monthlyAggregatedData.map(d => d.month));
-    
     const dataToUse = selectedMonth 
         ? filteredRawData.filter(d => d.month === selectedMonth) 
-        : filteredRawData.filter(d => monthsOfInterest.has(d.month));
+        : filteredRawData;
 
     dataToUse.forEach(item => {
       if (!aggMap.has(item.tech)) aggMap.set(item.tech, { name: item.tech, besoin: 0, besoin_encours: 0, capacite: 0 });
@@ -170,28 +396,20 @@ export default function MigrationDashboard() {
       entry.capacite += item.capacite;
     });
     return Array.from(aggMap.values());
-  }, [filteredRawData, selectedMonth, monthlyAggregatedData]);
+  }, [filteredRawData, selectedMonth]);
 
-  // Filtrage des événements
   const filteredEvents = useMemo(() => {
-    let events = EVENTS_DATA;
-    if (selectedTech !== 'Tous') {
-      events = events.filter(e => e.tech === selectedTech);
-    }
-    if (showPlanning) {
-      return events.filter(e => e.status === "A Planifier");
-    }
-    if (selectedMonth) {
-        events = events.filter(e => e.date !== "N/A" && e.date.startsWith(selectedMonth));
-    }
-    if (!showPlanning && !selectedMonth) {
-         events = events.filter(e => e.date !== "N/A");
-    }
+    let events = eventsData;
+    if (selectedTech !== 'Tous') events = events.filter(e => e.tech === selectedTech);
+    if (showPlanning) return events.filter(e => e.status === "A Planifier");
+    if (selectedMonth) events = events.filter(e => e.date !== "N/A" && e.date.startsWith(selectedMonth));
+    if (!showPlanning && !selectedMonth) events = events.filter(e => e.date !== "N/A");
     return events;
-  }, [selectedTech, selectedMonth, showPlanning]);
+  }, [selectedTech, selectedMonth, showPlanning, eventsData]);
 
-  // Calcul des KPIs
   const kpiStats = useMemo(() => {
+    if (!monthlyAggregatedData.length) return { besoin: 0, capacite: 0, delta: 0, ratio: 0 };
+    
     if (selectedMonth) {
       const monthData = monthlyAggregatedData.find(d => d.month === selectedMonth);
       if (!monthData) return { besoin: 0, capacite: 0, delta: 0, ratio: 0 };
@@ -208,7 +426,6 @@ export default function MigrationDashboard() {
       const totalCapacite = monthlyAggregatedData.reduce((acc, curr) => acc + curr.capacite, 0);
       const ratio = totalBesoin > 0 ? (totalCapacite / totalBesoin) * 100 : 0;
       const lastMonth = monthlyAggregatedData[monthlyAggregatedData.length - 1];
-      
       return {
         besoin: totalBesoin,
         capacite: totalCapacite,
@@ -230,8 +447,66 @@ export default function MigrationDashboard() {
     setSelectedMonth(null);
   };
 
+  // --- RENDER : ÉCRAN DE CHARGEMENT ---
+  if (!isDataLoaded) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 font-sans">
+        <div className="bg-white p-8 rounded-xl shadow-lg max-w-lg w-full text-center border border-slate-100">
+          <div className="bg-blue-50 p-4 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-6">
+            <Upload className="w-10 h-10 text-blue-600" />
+          </div>
+          <h1 className="text-2xl font-bold text-slate-800 mb-2">Tableau de Bord Migrations</h1>
+          <p className="text-slate-500 mb-8 px-4">
+            Importez vos fichiers CSV pour générer le tableau de bord.<br/>
+            <span className="text-xs text-slate-400">(Sélectionnez "backoffice.csv" et "encours.csv" en même temps)</span>
+          </p>
+          
+          <div className="space-y-4">
+            <div className="relative group">
+              <input 
+                type="file" 
+                multiple
+                accept=".csv,.txt"
+                onChange={handleSmartUpload}
+                className="hidden"
+                id="smart-upload"
+              />
+              <label 
+                htmlFor="smart-upload"
+                className="flex flex-col items-center justify-center gap-3 p-8 border-2 border-dashed border-blue-200 rounded-xl cursor-pointer transition-all hover:border-blue-500 hover:bg-blue-50/50 bg-slate-50"
+              >
+                <div className="bg-white p-3 rounded-full shadow-sm">
+                   <FileSpreadsheet className="w-8 h-8 text-blue-500" />
+                </div>
+                <div className="text-center">
+                  <span className="font-semibold text-blue-700 text-lg">Cliquez pour importer</span>
+                  <p className="text-slate-400 text-sm mt-1">Sélectionnez vos fichiers CSV</p>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {loadingMsg && (
+            <div className="mt-6 flex items-center justify-center gap-2 text-blue-600 animate-pulse">
+              <Loader className="w-5 h-5 animate-spin" />
+              <span>{loadingMsg}</span>
+            </div>
+          )}
+
+          {errorMsg && (
+            <div className="mt-6 p-3 bg-red-50 text-red-600 rounded-lg text-sm border border-red-100 flex items-center gap-2 justify-center">
+              <AlertTriangle className="w-4 h-4" />
+              {errorMsg}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // --- RENDER : TABLEAU DE BORD ---
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6">
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500">
       
       {/* HEADER */}
       <header className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
@@ -256,7 +531,7 @@ export default function MigrationDashboard() {
                     className="pl-7 pr-3 py-1.5 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
                 >
                     <option value="Tous">Tous les techs</option>
-                    {TECH_LIST.map(tech => (
+                    {techList.map(tech => (
                         <option key={tech} value={tech}>{tech}</option>
                     ))}
                 </select>
@@ -273,16 +548,8 @@ export default function MigrationDashboard() {
         </div>
       </header>
 
-      {/* INFO */}
-      <div className="mb-4 flex items-start gap-2 text-xs text-slate-500 bg-slate-100 p-2 rounded border border-slate-200">
-        <Info className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
-        <p>
-          <strong>Vue 12 mois glissants :</strong> Sept 2025 - Août 2026. <span className="text-red-500 font-semibold ml-2">Rouge</span> = Analyse en cours (1h/dossier).
-        </p>
-      </div>
-
-      {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        {/* Jauge Pipe Planning */}
         <div 
             onClick={handlePlanningClick}
             className={`px-4 py-3 rounded-lg shadow-sm border flex items-center justify-between cursor-pointer transition-all duration-200 
@@ -291,7 +558,7 @@ export default function MigrationDashboard() {
           <div>
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Pipe Planning</p>
             <div className="flex items-baseline gap-2">
-              <h3 className="text-xl font-bold text-indigo-600">{PLANNING_COUNT}</h3>
+              <h3 className="text-xl font-bold text-indigo-600">{planningCount}</h3>
               <p className="text-xs font-medium text-slate-400">dossiers prêts</p>
             </div>
           </div>
@@ -300,7 +567,7 @@ export default function MigrationDashboard() {
                <RadialBarChart 
                  innerRadius="70%" outerRadius="100%" 
                  barSize={4} 
-                 data={[{name: 'ready', value: PLANNING_COUNT, fill: '#4f46e5'}]} 
+                 data={[{name: 'ready', value: planningCount, fill: '#4f46e5'}]} 
                  startAngle={90} endAngle={-270}
                >
                  <RadialBar background dataKey="value" cornerRadius={10} />
@@ -325,7 +592,7 @@ export default function MigrationDashboard() {
           value={kpiStats.capacite.toFixed(0)} 
           subtext="Planifiée"
           icon={Clock} 
-          colorClass="text-emerald-600" // GREEN
+          colorClass="text-purple-600" 
           active={!!selectedMonth}
         />
          <KPICard 
@@ -338,17 +605,16 @@ export default function MigrationDashboard() {
         />
       </div>
 
-      {/* GRAPH CHART */}
       <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 mb-4">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
             <BarChart2 className="w-4 h-4 text-slate-400" />
-            Performance {selectedMonth ? `(Focus ${formatMonth(selectedMonth)})` : "(12 Mois)"}
+            Performance {selectedMonth ? `(Focus ${formatMonth(selectedMonth)})` : "(Globale)"}
           </h2>
           <div className="flex gap-3 text-[10px] font-medium uppercase tracking-wider text-slate-500">
-            <div className="flex items-center gap-1"><span className="w-2 h-2 bg-blue-500 rounded-full"></span> Besoin</div>
-            <div className="flex items-center gap-1"><span className="w-2 h-2 bg-red-500 rounded-full"></span> En Cours</div>
-            <div className="flex items-center gap-1"><span className="w-2 h-2 bg-emerald-500 rounded-full"></span> Capacité</div>
+            <div className="flex items-center gap-1"><span className="w-2 h-2 bg-cyan-500 rounded-full"></span> Besoin (Nouv.)</div>
+            <div className="flex items-center gap-1"><span className="w-2 h-2 bg-amber-500 rounded-full"></span> En Cours</div>
+            <div className="flex items-center gap-1"><span className="w-2 h-2 bg-purple-500 rounded-full"></span> Capacité</div>
             <div className="flex items-center gap-1"><span className="w-3 h-0.5 bg-slate-600"></span> Stock Temps</div>
           </div>
         </div>
@@ -382,18 +648,18 @@ export default function MigrationDashboard() {
               />
               <ReferenceLine y={0} yAxisId="right" stroke="#cbd5e1" strokeDasharray="3 3" />
               
-              <Bar yAxisId="left" stackId="a" dataKey="besoin" fill="#3b82f6" radius={[0, 0, 0, 0]} barSize={16}> {/* Blue */}
+              <Bar yAxisId="left" stackId="a" dataKey="besoin" fill="#06b6d4" radius={[0, 0, 0, 0]} barSize={16}>
                 {monthlyAggregatedData.map((entry, index) => (
                   <Cell key={`cell-besoin-${index}`} fillOpacity={selectedMonth && entry.month !== selectedMonth ? 0.3 : 1} />
                 ))}
               </Bar>
-              <Bar yAxisId="left" stackId="a" dataKey="besoin_encours" fill="#ef4444" radius={[3, 3, 0, 0]} barSize={16}> {/* Red */}
+              <Bar yAxisId="left" stackId="a" dataKey="besoin_encours" fill="#f59e0b" radius={[3, 3, 0, 0]} barSize={16}>
                  {monthlyAggregatedData.map((entry, index) => (
                   <Cell key={`cell-encours-${index}`} fillOpacity={selectedMonth && entry.month !== selectedMonth ? 0.3 : 1} />
                 ))}
               </Bar>
 
-              <Bar yAxisId="left" stackId="b" dataKey="capacite" fill="#10b981" radius={[3, 3, 0, 0]} barSize={16}> {/* Green */}
+              <Bar yAxisId="left" stackId="b" dataKey="capacite" fill="#a855f7" radius={[3, 3, 0, 0]} barSize={16}>
                  {monthlyAggregatedData.map((entry, index) => (
                   <Cell key={`cell-capa-${index}`} fillOpacity={selectedMonth && entry.month !== selectedMonth ? 0.3 : 1} />
                 ))}
@@ -405,7 +671,6 @@ export default function MigrationDashboard() {
         </div>
       </div>
 
-      {/* MONTHLY RESULTS TABLE */}
       <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden mb-4">
         <button 
           onClick={() => setIsTableExpanded(!isTableExpanded)}
@@ -425,8 +690,8 @@ export default function MigrationDashboard() {
                 <tr>
                   <th className="px-4 py-3 font-semibold">Mois</th>
                   <th className="px-4 py-3 font-semibold text-right">Besoin Total</th>
-                  <th className="px-4 py-3 font-semibold text-right text-red-500">Dont En Cours</th>
-                  <th className="px-4 py-3 font-semibold text-right text-emerald-600">Capacité</th> 
+                  <th className="px-4 py-3 font-semibold text-right text-amber-500">Dont En Cours</th>
+                  <th className="px-4 py-3 font-semibold text-right text-purple-600">Capacité</th> 
                   <th className="px-4 py-3 font-semibold text-right">Ecart Mensuel</th>
                   <th className="px-4 py-3 font-semibold text-right text-slate-600">Stock Temps</th>
                 </tr>
@@ -436,8 +701,8 @@ export default function MigrationDashboard() {
                   <tr key={row.month} className={`hover:bg-slate-50 transition-colors ${selectedMonth === row.month ? 'bg-blue-50/50' : ''}`}>
                     <td className="px-4 py-2 font-medium text-slate-800 capitalize">{row.formattedMonth}</td>
                     <td className="px-4 py-2 text-right">{row.totalBesoinMois.toFixed(1)} h</td>
-                    <td className="px-4 py-2 text-right text-red-500">{row.besoin_encours > 0 ? `${row.besoin_encours.toFixed(1)} h` : '-'}</td>
-                    <td className="px-4 py-2 text-right text-emerald-600 font-medium">{row.capacite.toFixed(1)} h</td>
+                    <td className="px-4 py-2 text-right text-amber-500">{row.besoin_encours > 0 ? `${row.besoin_encours.toFixed(1)} h` : '-'}</td>
+                    <td className="px-4 py-2 text-right text-purple-600 font-medium">{row.capacite.toFixed(1)} h</td>
                     <td className="px-4 py-2 text-right">
                       <span className={`px-2 py-0.5 rounded text-xs font-medium ${row.soldeMensuel >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
                         {row.soldeMensuel > 0 ? '+' : ''}{row.soldeMensuel.toFixed(1)} h
@@ -454,7 +719,6 @@ export default function MigrationDashboard() {
         )}
       </div>
 
-      {/* SECONDARY CHARTS */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100">
             <h2 className="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
@@ -468,9 +732,9 @@ export default function MigrationDashboard() {
                 <XAxis type="number" hide />
                 <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fill: '#475569', fontSize: 10, fontWeight: 500}} width={120} />
                 <Tooltip cursor={{fill: 'transparent'}} contentStyle={{borderRadius: '6px', fontSize: '12px'}} formatter={(value) => [`${parseFloat(value).toFixed(1)} h`, '']} />
-                <Bar dataKey="besoin" fill="#3b82f6" barSize={8} stackId="a" radius={[0, 0, 0, 0]} /> {/* Blue */}
-                <Bar dataKey="besoin_encours" fill="#ef4444" barSize={8} stackId="a" radius={[0, 2, 2, 0]} /> {/* Red */}
-                <Bar dataKey="capacite" fill="#10b981" barSize={8} radius={[0, 2, 2, 0]} stackId="b" /> {/* Green */}
+                <Bar dataKey="besoin" fill="#06b6d4" barSize={8} stackId="a" radius={[0, 0, 0, 0]} /> {/* Cyan */}
+                <Bar dataKey="besoin_encours" fill="#f59e0b" barSize={8} stackId="a" radius={[0, 2, 2, 0]} /> {/* Amber */}
+                <Bar dataKey="capacite" fill="#a855f7" barSize={8} radius={[0, 2, 2, 0]} stackId="b" /> {/* Purple */}
                 </BarChart>
             </ResponsiveContainer>
             </div>
@@ -487,8 +751,8 @@ export default function MigrationDashboard() {
               <AreaChart data={monthlyAggregatedData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="gradCapacite" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/> 
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                    <stop offset="5%" stopColor="#a855f7" stopOpacity={0.2}/> 
+                    <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
@@ -496,15 +760,14 @@ export default function MigrationDashboard() {
                 <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10}} />
                 <Tooltip contentStyle={{borderRadius: '6px', fontSize: '12px'}} />
                 {selectedMonth && <ReferenceLine x={selectedMonth} stroke="#3b82f6" strokeDasharray="2 2" />}
-                <Area type="monotone" dataKey="cumulCapacite" stroke="#10b981" strokeWidth={2} fill="url(#gradCapacite)" /> 
-                <Area type="monotone" dataKey="cumulBesoin" stroke="#3b82f6" strokeWidth={2} fill="transparent" strokeDasharray="3 3" /> {/* Blue */}
+                <Area type="monotone" dataKey="cumulCapacite" stroke="#a855f7" strokeWidth={2} fill="url(#gradCapacite)" /> 
+                <Area type="monotone" dataKey="cumulBesoin" stroke="#06b6d4" strokeWidth={2} fill="transparent" strokeDasharray="3 3" /> {/* Cyan */}
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </div>
       </div>
 
-      {/* --- LISTE OPÉRATIONS --- */}
       <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden mb-8">
         <button 
           onClick={() => setIsDetailListExpanded(!isDetailListExpanded)}
@@ -549,10 +812,10 @@ export default function MigrationDashboard() {
                     </td>
                     <td className="px-2 py-1 text-center whitespace-nowrap">
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider
-                        ${event.color === 'blue' ? 'bg-blue-100 text-blue-700' : 
-                          event.color === 'green' ? 'bg-emerald-100 text-emerald-700' : 
+                        ${event.color === 'cyan' ? 'bg-cyan-100 text-cyan-700' : 
+                          event.color === 'purple' ? 'bg-purple-100 text-purple-700' : 
                           event.color === 'indigo' ? 'bg-indigo-100 text-indigo-700' : 
-                          event.color === 'red' ? 'bg-red-100 text-red-700' : 'bg-slate-100'}`}>
+                          event.color === 'amber' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
                         {event.status}
                       </span>
                     </td>
