@@ -7,10 +7,10 @@ import {
   Activity, Users, Clock, TrendingUp, AlertTriangle, CheckCircle, 
   Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Upload, FileSpreadsheet, Loader
 } from 'lucide-react';
-
+import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser } from "@clerk/clerk-react";
 // --- CONFIGURATION ---
 const TECH_LIST_DEFAULT = ["Jean-Philippe SAUROIS", "Jean-michel MESSIN", "Mathieu GROSSI", "Roderick GAMONDES", "Zakaria AYAT"];
-
+const clerkPubKey = process.env.REACT_APP_CLERK_PUBLISHABLE_KEY;
 // --- UTILITAIRES ---
 
 const normalizeTechName = (name, techList) => {
@@ -89,7 +89,7 @@ const KPICard = ({ title, value, subtext, icon: Icon, colorClass, active, onClic
 
 // --- APPLICATION PRINCIPALE ---
 
-export default function MigrationDashboard() {
+function MigrationDashboard() {
   // États des données (Initialisés vides)
   const [backofficeData, setBackofficeData] = useState([]);
   const [encoursData, setEncoursData] = useState([]);
@@ -523,6 +523,7 @@ export default function MigrationDashboard() {
         </div>
         
         <div className="flex gap-2 items-center">
+                <UserButton />
             <div className="relative">
                 <Filter className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
                 <select 
@@ -835,5 +836,31 @@ export default function MigrationDashboard() {
       </div>
 
     </div>
+  );
+}
+// --- LE NOUVEAU GARDIEN DE SÉCURITÉ ---
+// C'est lui qui devient le "Chef" de l'application (export default)
+
+export default function App() {
+  if (!clerkPubKey) {
+    return (
+      <div className="flex items-center justify-center h-screen text-red-600 font-bold">
+        Erreur : Clé Clerk (REACT_APP_CLERK_PUBLISHABLE_KEY) manquante dans Vercel.
+      </div>
+    );
+  }
+
+  return (
+    <ClerkProvider publishableKey={clerkPubKey}>
+      {/* Si l'utilisateur est connecté, on affiche ton Dashboard */}
+      <SignedIn>
+        <MigrationDashboard />
+      </SignedIn>
+
+      {/* Si l'utilisateur n'est PAS connecté, on le force à se connecter */}
+      <SignedOut>
+        <RedirectToSignIn />
+      </SignedOut>
+    </ClerkProvider>
   );
 }
