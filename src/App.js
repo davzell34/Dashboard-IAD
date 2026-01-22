@@ -736,4 +736,56 @@ function MigrationDashboard() {
                     </td>
                     <td className="px-2 py-1 whitespace-nowrap truncate max-w-[150px]">{event.tech}</td>
                     <td className="px-2 py-1 font-medium text-slate-700 whitespace-nowrap truncate max-w-[200px]" title={event.client}>{event.client}</td>
-                    <td className="
+                    <td className="px-2 py-1 text-slate-500 whitespace-nowrap">{event.type}</td>
+                    <td className="px-2 py-1 text-right font-medium whitespace-nowrap">
+                      {event.duration > 0 ? event.duration.toFixed(2) : '-'}
+                    </td>
+                    <td className="px-2 py-1 text-center whitespace-nowrap">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider
+                        ${event.color === 'cyan' ? 'bg-cyan-100 text-cyan-700' : 
+                          event.color === 'purple' ? 'bg-purple-100 text-purple-700' : 
+                          event.color === 'indigo' ? 'bg-indigo-100 text-indigo-700' : 
+                          event.color === 'amber' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
+                        {event.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {filteredEvents.length === 0 && (
+                  <tr>
+                    <td colSpan="6" className="px-4 py-8 text-center text-slate-400 italic">
+                      Aucun événement trouvé pour cette sélection.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+    </div>
+  );
+}
+
+// --- LE NOUVEAU GARDIEN DE SÉCURITÉ ---
+export default function App() {
+  if (!clerkPubKey) {
+    return (
+      <div className="flex items-center justify-center h-screen text-red-600 font-bold">
+        Erreur : Clé Clerk (REACT_APP_CLERK_PUBLISHABLE_KEY) manquante dans Vercel.
+      </div>
+    );
+  }
+
+  return (
+    <ClerkProvider publishableKey={clerkPubKey}>
+      <SignedIn>
+        <MigrationDashboard />
+      </SignedIn>
+      <SignedOut>
+        <RedirectToSignIn />
+      </SignedOut>
+    </ClerkProvider>
+  );
+}
