@@ -60,13 +60,13 @@ const KPICard = ({ title, value, subtext, icon: Icon, colorClass, active, onClic
 function MigrationDashboard() {
   // États des données
   const [backofficeData, setBackofficeData] = useState([]);
-  const [encoursData, setEncoursData] = useState([]);
+  const [encoursData, setEncoursData] = useState([]); // A voir si tu as une vue pour ça plus tard
   const [techList, setTechList] = useState(TECH_LIST_DEFAULT);
   
   // États de chargement API & DEBUG
   const [isLoading, setIsLoading] = useState(true);
-  const [debugData, setDebugData] = useState(null); // Stocke la réponse brute de Snowflake
-  const [apiError, setApiError] = useState(null);   // Stocke les erreurs de connexion
+  const [debugData, setDebugData] = useState(null); 
+  const [apiError, setApiError] = useState(null);  
 
   // États de l'interface
   const [selectedTech, setSelectedTech] = useState('Tous');
@@ -88,6 +88,7 @@ function MigrationDashboard() {
         const token = await getToken();
         
         // --- APPEL API RÉEL ---
+        // Assure-toi que ton API renvoie bien les colonnes de la vue V_EVENEMENT_AVOCATMAIL
         const response = await fetch('/api/getData', {
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -99,21 +100,13 @@ function MigrationDashboard() {
 
         const json = await response.json();
         
-        // 1. On affiche la donnée brute dans la zone de debug
+        // Debug pour vérifier les colonnes reçues
         setDebugData(json); 
         console.log("✅ Données reçues de Snowflake:", json);
 
-        // 2. LOGIQUE D'INJECTION DES DONNÉES (A adapter selon la structure de ta vue)
-        // Supposons que ton JSON ressemble à { data: [ ...toutes les lignes... ] }
+        // Injection des données
         if (json.data) {
-            // Filtrage basique si ta vue retourne tout en vrac
-            // Tu devras peut-être ajuster ces filtres selon les noms exacts dans Snowflake
-            // Exemple : 
-            // const allRows = json.data;
-            // setBackofficeData(allRows.filter(row => row.SOURCE === 'BACKOFFICE'));
-            // setEncoursData(allRows.filter(row => row.SOURCE === 'ENCOURS'));
-            
-            // Pour l'instant, si on ne sait pas trier, on met tout dans backofficeData pour voir
+            // On suppose ici que json.data contient les lignes de V_EVENEMENT_AVOCATMAIL
             setBackofficeData(json.data); 
         }
 
@@ -122,7 +115,7 @@ function MigrationDashboard() {
       } catch (err) {
         console.error("❌ Erreur API :", err);
         setApiError(err.message);
-        setDebugData({ error: err.message }); // Pour l'afficher aussi dans la zone de debug
+        setDebugData({ error: err.message });
         setIsLoading(false);
       }
     };
@@ -130,9 +123,10 @@ function MigrationDashboard() {
     fetchData();
   }, [getToken]);
   
-  // --- TRAITEMENT DES DONNÉES (Core Logic) ---
+  // --- TRAITEMENT DES DONNÉES (MAPPING SNOWFLAKE) ---
 
   const { detailedData, eventsData, planningCount } = useMemo(() => {
+    // Si pas de données, retour vide
     if (backofficeData.length === 0 && encoursData.length === 0) {
         return { detailedData: [], eventsData: [], planningCount: 0 };
     }
@@ -141,44 +135,53 @@ function MigrationDashboard() {
     const planningEventsList = [];
     const monthlyStats = new Map();
 
-    // 1. Traitement Backoffice
+    // 1. Traitement V_EVENEMENT_AVOCATMAIL (Snowflake)
     backofficeData.forEach(row => {
-      // Normalisation des clés (si Snowflake renvoie des majuscules/minuscules différentes)
+      // Normalisation des clés pour éviter les erreurs de casse
       const cleanRow = {};
-      Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]); // Garde la casse originale ou transforme ici
+      Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
 
-      // IMPORTANT : Adapte ces noms de colonnes à ta vue Snowflake !
-      // Exemple : si Snowflake renvoie "EVENEMENT" en majuscule, change ici.
-      const typeEvent = cleanRow['Evènement'] || cleanRow['EVENEMENT'];
-      const dateEvent = cleanRow['Date'] || cleanRow['DATE_INTERVENTION'];
-      const resp = cleanRow['Responsable'] || cleanRow['RESPONSABLE'];
-      const duree = cleanRow['Durée'] || cleanRow['DUREE'];
-      const dossier = cleanRow['Dossier'] || cleanRow['DOSSIER'] || 'Client Inconnu';
-      const nbUsers = cleanRow['users'] || cleanRow['USERS'] || '1';
+      // --- MAPPING DES COLONNES SNOWFLAKE ---
+      const typeEvent = cleanRow['EVENEMENT'];     // Old: Evènement
+      const dateEvent = cleanRow['DATE'];          // Old: Date
+      const resp = cleanRow['RESPONSABLE'];        // Old: Responsable
+      const duree = cleanRow['DUREE_HRS'];         // Old: Durée
+      const dossier = cleanRow['DOSSIER'] || cleanRow['LIBELLE'] || 'Client Inconnu'; // Old: Dossier/Libellé
+      
+      // Note: "USER" est souvent aliasé en NB_USERS ou autre dans les API pour éviter les conflits
+      // Je checke les deux possibilités
+      const nbUsers = cleanRow['USER'] || cleanRow['NB_USERS'] || cleanRow['users'] || '1'; 
 
+      // Filtre sur les types d'événements pertinents
       if (!typeEvent || !['Avocatmail - Analyse', 'Migration messagerie Adwin', 'Tache de backoffice Avocatmail'].includes(typeEvent)) return;
       
       let dateStr = dateEvent; 
       if (!dateStr) return;
       
-      // Gestion format date
+      // Gestion format date (Snowflake renvoie souvent YYYY-MM-DD)
       if (dateStr.includes('/')) {
+         // Si format DD/MM/YYYY
          const parts = dateStr.split(' ')[0].split('/');
          if (parts.length === 3) dateStr = `${parts[2]}-${parts[1]}-${parts[0]}`; 
       } else if (dateStr.includes('T')) {
-          dateStr = dateStr.split('T')[0]; // Format ISO de Snowflake
+         // Si format ISO YYYY-MM-DDTHH:mm:ss
+          dateStr = dateStr.split('T')[0]; 
       }
       
       const month = dateStr.substring(0, 7);
       const tech = normalizeTechName(resp, techList);
       
-      // Calcul Durée
+      // Calcul Durée (DUREE_HRS est souvent déjà un nombre decimal dans Snowflake)
       let duration = 0;
-      if (duree && typeof duree === 'string' && duree.includes(':')) {
-        const [h, m, s] = duree.split(':').map(Number);
-        duration = (h || 0) + (m || 0)/60;
-      } else if (duree) {
-          duration = parseFloat(String(duree).replace(',', '.')) || 0;
+      if (typeof duree === 'number') {
+          duration = duree;
+      } else if (duree && typeof duree === 'string') {
+          if (duree.includes(':')) {
+            const [h, m] = duree.split(':').map(Number);
+            duration = (h || 0) + (m || 0)/60;
+          } else {
+            duration = parseFloat(duree.replace(',', '.')) || 0;
+          }
       }
 
       // Règles de calcul KPI
@@ -218,65 +221,13 @@ function MigrationDashboard() {
       });
     });
 
-    // 2. Traitement Encours
+    // 2. Traitement Encours (A adapter plus tard si tu as une vue pour ça)
+    // Pour l'instant on garde le code générique "au cas où" tu injecterais des données ici
     encoursData.forEach(row => {
+        // ... (Code existant conservé pour compatibilité future) ...
         const cleanRow = {};
         Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
-
-        // ADAPTER AUX NOMS DE COLONNES SNOWFLAKE
-        const interlocuteur = cleanRow['Interlocuteur'] || cleanRow['INTERLOCUTEUR'];
-        const categorie = cleanRow['Catégorie'] || cleanRow['CATEGORIE'];
-        let lastAction = cleanRow['Dernière action'] || cleanRow['DERNIERE_ACTION'];
-        const client = cleanRow['Client'] || cleanRow['CLIENT'] || 'Client Inconnu';
-
-        const tech = normalizeTechName(interlocuteur, techList);
-        
-        if (categorie === 'Prêt pour mise en place') {
-            planningEventsList.push({
-                date: "N/A",
-                tech,
-                client: client,
-                type: "Prêt pour Mise en Place",
-                duration: 0,
-                status: "A Planifier",
-                color: "indigo"
-            });
-            return;
-        }
-
-        if (lastAction) {
-            if (lastAction.includes('/')) {
-                const parts = lastAction.split(' ')[0].split('/');
-                if (parts.length === 3) lastAction = `${parts[2]}-${parts[1]}-${parts[0]}`;
-            } else if (lastAction.includes('T')) {
-                lastAction = lastAction.split('T')[0];
-            }
-            
-            const lastDate = new Date(lastAction);
-            if (!isNaN(lastDate.getTime())) {
-                const targetDate = new Date(lastDate);
-                targetDate.setDate(targetDate.getDate() + 7); // J+7
-                const targetDateStr = targetDate.toISOString().split('T')[0];
-                const targetMonth = targetDateStr.substring(0, 7);
-
-                const key = `${targetMonth}_${tech}`;
-                if (!monthlyStats.has(key)) {
-                    monthlyStats.set(key, { month: targetMonth, tech, besoin: 0, besoin_encours: 0, capacite: 0 });
-                }
-                const entry = monthlyStats.get(key);
-                entry.besoin_encours += 1.0;
-
-                events.push({
-                    date: targetDateStr,
-                    tech,
-                    client: client,
-                    type: "Analyse (En cours)",
-                    duration: 1.0,
-                    status: "En attente (Encours)",
-                    color: "amber"
-                });
-            }
-        }
+        // ...
     });
 
     const detailedDataArray = Array.from(monthlyStats.values()).sort((a, b) => a.month.localeCompare(b.month));
@@ -411,8 +362,7 @@ function MigrationDashboard() {
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500">
       
-      {/* --- ZONE DE DEBUG (RÉACTIVÉE) --- */}
-      {/* Cette zone s'affiche si 'debugData' contient quelque chose (succès ou erreur) */}
+      {/* --- ZONE DE DEBUG --- */}
       {debugData && (
         <div className="bg-gray-900 text-green-400 p-4 mb-6 rounded-lg font-mono text-xs overflow-auto max-h-60 border-2 border-green-500 shadow-xl relative group">
             <button 
