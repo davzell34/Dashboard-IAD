@@ -37,7 +37,7 @@ export default async function handler(request, response) {
       }
 
       // Ta requête (celle qui marche !)
-      const sql = `SELECT * FROM V_GETLISTEDOSSIERSRECHERCHES LIMIT 100`;
+      const sql = `SELECT * FROM V_EVENEMENT_AVOCATMAIL LIMIT 100`;
 
       conn.execute({
         sqlText: sql,
