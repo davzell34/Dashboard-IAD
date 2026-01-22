@@ -5,12 +5,14 @@ import {
 } from 'recharts';
 import { 
   Activity, Users, Clock, TrendingUp, AlertTriangle, CheckCircle, 
-  Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Upload, FileSpreadsheet, Loader
+  Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Loader
 } from 'lucide-react';
 import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
+
 // --- CONFIGURATION ---
 const TECH_LIST_DEFAULT = ["Jean-Philippe SAUROIS", "Jean-michel MESSIN", "Mathieu GROSSI", "Roderick GAMONDES", "Zakaria AYAT"];
 const clerkPubKey = process.env.REACT_APP_CLERK_PUBLISHABLE_KEY;
+
 // --- UTILITAIRES ---
 
 const normalizeTechName = (name, techList) => {
@@ -31,40 +33,6 @@ const formatMonth = (dateStr) => {
   const [year, month] = dateStr.split('-');
   const date = new Date(parseInt(year), parseInt(month) - 1, 1);
   return date.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
-};
-
-// Fonction simple pour parser un CSV (séparateur , ou ;)
-const parseCSV = (text) => {
-  if (!text) return [];
-  const lines = text.split(/\r\n|\n/).filter(l => l.trim());
-  if (lines.length < 2) return [];
-
-  // Détection du séparateur (virgule ou point-virgule)
-  const firstLine = lines[0];
-  const separator = firstLine.includes(';') ? ';' : ',';
-
-  const headers = firstLine.split(separator).map(h => h.trim().replace(/"/g, ''));
-  
-  return lines.slice(1).map(line => {
-    // Gestion basique des guillemets
-    const regex = new RegExp(`(?:${separator}|\\r?\\n|^)(?:"([^"]*)"|([^"${separator}]*))`, 'g');
-    const values = [];
-    let match;
-    while ((match = regex.exec(line))) {
-       // match[1] is quoted value, match[2] is unquoted
-       values.push(match[1] ? match[1] : match[2]); 
-    }
-    // Fallback simple split si regex échoue ou trop complexe
-    const simpleValues = line.split(separator).map(val => val.trim().replace(/^"|"$/g, ''));
-    
-    // On utilise simpleValues si le compte correspond, sinon on essaie de mapper au mieux
-    const dataRow = simpleValues.length === headers.length ? simpleValues : values;
-
-    return headers.reduce((obj, header, index) => {
-      obj[header] = dataRow[index] || '';
-      return obj;
-    }, {});
-  });
 };
 
 // --- COMPOSANTS UI ---
@@ -90,15 +58,14 @@ const KPICard = ({ title, value, subtext, icon: Icon, colorClass, active, onClic
 // --- APPLICATION PRINCIPALE ---
 
 function MigrationDashboard() {
-  // États des données (Initialisés vides)
+  // États des données
   const [backofficeData, setBackofficeData] = useState([]);
   const [encoursData, setEncoursData] = useState([]);
   const [techList, setTechList] = useState(TECH_LIST_DEFAULT);
   
-  // États de chargement
-  const [isDataLoaded, setIsDataLoaded] = useState(false);
-  const [loadingMsg, setLoadingMsg] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
+  // États de chargement API
+  const [isLoading, setIsLoading] = useState(true); // Chargement activé par défaut au démarrage
+  const [debugData, setDebugData] = useState(null); 
 
   // États de l'interface
   const [selectedTech, setSelectedTech] = useState('Tous');
@@ -107,156 +74,75 @@ function MigrationDashboard() {
   const [isDetailListExpanded, setIsDetailListExpanded] = useState(true);
   const [showPlanning, setShowPlanning] = useState(false); 
 
-  // ... tes autres useState ...
-  const [debugData, setDebugData] = useState(null); 
-
-// --- AJOUT SÉCURITÉ & CONNEXION ---
-  const { getToken } = useAuth(); // On récupère l'outil pour générer le token
+  // --- SÉCURITÉ & CONNEXION SNOWFLAKE ---
+  const { getToken } = useAuth(); 
 
   useEffect(() => {
     const fetchData = async () => {
-      // Pour l'instant, on log juste dans la console pour vérifier que la sécu marche
-      // sans écraser tes données CSV si tu t'en sers encore.
-      console.log("🔒 Tentative de connexion sécurisée...");
+      console.log("🔒 Connexion Snowflake en cours...");
+      setIsLoading(true);
 
       try {
-        // 1. On demande le badge (Token) à Clerk
         const token = await getToken();
         
-        // 2. On appelle l'API en attachant le badge
+        // Appel API (à décommenter/adapter quand ton endpoint sera prêt)
+        /*
         const response = await fetch('/api/getData', {
-          headers: {
-            Authorization: `Bearer ${token}` // C'est ici que la magie opère
-          }
+          headers: { Authorization: `Bearer ${token}` }
         });
 
-        if (response.status === 401) throw new Error("Accès refusé par l'API (401)");
-        if (!response.ok) throw new Error("Erreur réseau");
-
+        if (!response.ok) throw new Error(`Erreur API: ${response.status}`);
         const json = await response.json();
-        console.log("✅ Données reçues de Snowflake :", json);
-        setDebugData(json);
-
-        // QUAND TU SERAS PRÊT À UTILISER LES DONNÉES SNOWFLAKE :
-        // Tu pourras décommenter et adapter les lignes ci-dessous pour remplir le tableau :
         
-        /*
-        const data = json.data || [];
-        // Exemple d'adaptation (Vérifie les noms de colonnes dans ta console !)
-        const backData = data.filter(row => row['SOURCE'] === 'BACKOFFICE');
-        setBackofficeData(backData);
-        setIsDataLoaded(true);
+        setDebugData(json); // Pour voir la structure brute
+        
+        // ADAPTATION REQUISE ICI SELON TA VUE SNOWFLAKE :
+        // Exemple : si ta vue renvoie un tableau unique d'événements
+        // setBackofficeData(json.data || []); 
         */
+
+        // Simulation fin de chargement pour l'instant
+        setTimeout(() => {
+             console.log("✅ (Simulation) Données chargées ou dashboard prêt");
+             setIsLoading(false);
+        }, 1000);
 
       } catch (err) {
         console.error("❌ Erreur API :", err);
+        setIsLoading(false);
       }
     };
 
     fetchData();
   }, [getToken]);
   
-  // --- LOGIQUE D'IMPORTATION INTELLIGENTE ---
-
-  const handleSmartUpload = (event) => {
-    const files = Array.from(event.target.files);
-    if (files.length === 0) return;
-
-    setLoadingMsg("Analyse des fichiers en cours...");
-    setErrorMsg('');
-    
-    let newBackofficeData = [];
-    let newEncoursData = [];
-    let foundBackoffice = false;
-    let foundEncours = false;
-
-    // Compteur pour savoir quand tous les fichiers sont lus
-    let filesRead = 0;
-
-    files.forEach(file => {
-      const reader = new FileReader();
-      
-      reader.onload = (e) => {
-        try {
-          const text = e.target.result;
-          const jsonData = parseCSV(text);
-
-          if (jsonData.length > 0) {
-            // Détection automatique du type de fichier via les colonnes
-            const columns = Object.keys(jsonData[0]);
-            
-            // Fichier Backoffice contient généralement "Evènement"
-            if (columns.some(c => c.includes('Evènement') || c.includes('Evenement') || c.includes('Dossier'))) {
-              newBackofficeData = jsonData;
-              foundBackoffice = true;
-            } 
-            // Fichier Encours contient "Interlocuteur"
-            else if (columns.some(c => c.includes('Interlocuteur') || c.includes('Catégorie') || c.includes('Client'))) {
-              newEncoursData = jsonData;
-              foundEncours = true;
-            }
-          }
-        } catch (err) {
-          console.error("Erreur parsing", err);
-        } finally {
-          filesRead++;
-          // Vérification finale une fois tous les fichiers lus
-          if (filesRead === files.length) {
-            if (foundBackoffice || foundEncours) {
-              if (foundBackoffice) setBackofficeData(newBackofficeData);
-              if (foundEncours) setEncoursData(newEncoursData);
-              
-              // Mise à jour de la liste des techniciens
-              const techs = new Set();
-              if (foundBackoffice) {
-                newBackofficeData.forEach(row => {
-                  if (row['Responsable']) techs.add(normalizeTechName(row['Responsable'], TECH_LIST_DEFAULT));
-                });
-              }
-              if (foundEncours) {
-                newEncoursData.forEach(row => {
-                  if (row['Interlocuteur']) techs.add(normalizeTechName(row['Interlocuteur'], TECH_LIST_DEFAULT));
-                });
-              }
-              if (techs.size > 0) setTechList(Array.from(techs).sort());
-              
-              setIsDataLoaded(true);
-              setLoadingMsg('');
-            } else {
-              setErrorMsg("Impossible d'identifier les fichiers. Vérifiez qu'il s'agit bien de fichiers CSV valides avec les bonnes colonnes.");
-              setLoadingMsg('');
-            }
-          }
-        }
-      };
-      reader.readAsText(file); // Lecture en texte pour CSV
-    });
-  };
-
   // --- TRAITEMENT DES DONNÉES (Core Logic) ---
+  // Note: Ce bloc s'exécutera même si les tableaux sont vides, renvoyant des stats à 0.
 
   const { detailedData, eventsData, planningCount } = useMemo(() => {
-    if (!isDataLoaded) return { detailedData: [], eventsData: [], planningCount: 0 };
+    // Si pas de données, on retourne des objets vides pour afficher le dashboard à zéro
+    if (backofficeData.length === 0 && encoursData.length === 0) {
+        return { detailedData: [], eventsData: [], planningCount: 0 };
+    }
 
     const events = [];
     const planningEventsList = [];
     const monthlyStats = new Map();
 
-    // 1. Traitement Backoffice
+    // 1. Traitement Backoffice (Logique existante conservée)
     backofficeData.forEach(row => {
-      // Nettoyage des clés (parfois des espaces invisibles dans les headers CSV)
       const cleanRow = {};
       Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
 
+      // ADAPTATION A FAIRE : Vérifier si les noms de colonnes 'Evènement', 'Date' existent dans ta vue Snowflake
       if (!['Avocatmail - Analyse', 'Migration messagerie Adwin', 'Tache de backoffice Avocatmail'].includes(cleanRow['Evènement'])) return;
       
       let dateStr = cleanRow['Date']; 
       if (!dateStr) return;
       
-      // Tentative de parsing date format YYYY-MM-DD ou DD/MM/YYYY
       if (dateStr.includes('/')) {
          const parts = dateStr.split(' ')[0].split('/');
-         if (parts.length === 3) dateStr = `${parts[2]}-${parts[1]}-${parts[0]}`; // Convertir DD/MM/YYYY en YYYY-MM-DD
+         if (parts.length === 3) dateStr = `${parts[2]}-${parts[1]}-${parts[0]}`; 
       }
       
       const month = dateStr.substring(0, 7);
@@ -265,14 +151,14 @@ function MigrationDashboard() {
       // Calcul Durée
       let duration = 0;
       const dureeStr = cleanRow['Durée'];
-      if (dureeStr && dureeStr.includes(':')) {
+      if (dureeStr && typeof dureeStr === 'string' && dureeStr.includes(':')) {
         const [h, m, s] = dureeStr.split(':').map(Number);
         duration = (h || 0) + (m || 0)/60;
       } else if (dureeStr) {
-          duration = parseFloat(dureeStr.replace(',', '.')) || 0;
+          duration = parseFloat(String(dureeStr).replace(',', '.')) || 0;
       }
 
-      // Règles de calcul
+      // Règles de calcul KPI
       let besoin = 0;
       let capacite = 0;
       let color = 'gray';
@@ -309,7 +195,7 @@ function MigrationDashboard() {
       });
     });
 
-    // 2. Traitement Encours
+    // 2. Traitement Encours (Logique existante conservée)
     encoursData.forEach(row => {
         const cleanRow = {};
         Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
@@ -318,7 +204,6 @@ function MigrationDashboard() {
         const category = cleanRow['Catégorie'];
         let lastActionDateStr = cleanRow['Dernière action'];
         
-        // Planning (Indigo)
         if (category === 'Prêt pour mise en place') {
             planningEventsList.push({
                 date: "N/A",
@@ -332,9 +217,7 @@ function MigrationDashboard() {
             return;
         }
 
-        // En cours (Orange/Amber)
         if (lastActionDateStr) {
-             // Parsing date DD/MM/YYYY ou YYYY-MM-DD
             if (lastActionDateStr.includes('/')) {
                 const parts = lastActionDateStr.split(' ')[0].split('/');
                 if (parts.length === 3) lastActionDateStr = `${parts[2]}-${parts[1]}-${parts[0]}`;
@@ -375,7 +258,7 @@ function MigrationDashboard() {
         eventsData: allEvents,
         planningCount: planningEventsList.length
     };
-  }, [backofficeData, encoursData, isDataLoaded, techList]);
+  }, [backofficeData, encoursData, techList]);
 
   // --- LOGIQUE D'AFFICHAGE ---
 
@@ -385,9 +268,8 @@ function MigrationDashboard() {
   }, [selectedTech, detailedData]);
 
   const monthlyAggregatedData = useMemo(() => {
-    if (!isDataLoaded || detailedData.length === 0) return [];
+    if (detailedData.length === 0) return [];
     
-    // Plage dynamique basée sur les données chargées
     const allMonths = detailedData.map(d => d.month).sort();
     const startMonthStr = allMonths[0] || '2025-01';
     const endMonthStr = allMonths[allMonths.length - 1] || '2026-12';
@@ -429,7 +311,7 @@ function MigrationDashboard() {
         current.setMonth(current.getMonth() + 1);
     }
     return result;
-  }, [filteredRawData, isDataLoaded, detailedData]);
+  }, [filteredRawData, detailedData]);
 
   const techAggregatedData = useMemo(() => {
     const aggMap = new Map();
@@ -496,81 +378,15 @@ function MigrationDashboard() {
     setSelectedMonth(null);
   };
 
-  // --- RENDER : ÉCRAN DE CHARGEMENT ---
-  if (!isDataLoaded) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 font-sans">
-        <div className="bg-white p-8 rounded-xl shadow-lg max-w-lg w-full text-center border border-slate-100">
-          <div className="bg-blue-50 p-4 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-6">
-            <Upload className="w-10 h-10 text-blue-600" />
-          </div>
-          <h1 className="text-2xl font-bold text-slate-800 mb-2">Tableau de Bord Migrations</h1>
-          <p className="text-slate-500 mb-8 px-4">
-            Importez vos fichiers CSV pour générer le tableau de bord.<br/>
-            <span className="text-xs text-slate-400">(Sélectionnez "backoffice.csv" et "encours.csv" en même temps)</span>
-          </p>
-          
-          <div className="space-y-4">
-            <div className="relative group">
-              <input 
-                type="file" 
-                multiple
-                accept=".csv,.txt"
-                onChange={handleSmartUpload}
-                className="hidden"
-                id="smart-upload"
-              />
-              <label 
-                htmlFor="smart-upload"
-                className="flex flex-col items-center justify-center gap-3 p-8 border-2 border-dashed border-blue-200 rounded-xl cursor-pointer transition-all hover:border-blue-500 hover:bg-blue-50/50 bg-slate-50"
-              >
-                <div className="bg-white p-3 rounded-full shadow-sm">
-                   <FileSpreadsheet className="w-8 h-8 text-blue-500" />
-                </div>
-                <div className="text-center">
-                  <span className="font-semibold text-blue-700 text-lg">Cliquez pour importer</span>
-                  <p className="text-slate-400 text-sm mt-1">Sélectionnez vos fichiers CSV</p>
-                </div>
-              </label>
-            </div>
-          </div>
-
-          {loadingMsg && (
-            <div className="mt-6 flex items-center justify-center gap-2 text-blue-600 animate-pulse">
-              <Loader className="w-5 h-5 animate-spin" />
-              <span>{loadingMsg}</span>
-            </div>
-          )}
-
-          {errorMsg && (
-            <div className="mt-6 p-3 bg-red-50 text-red-600 rounded-lg text-sm border border-red-100 flex items-center gap-2 justify-center">
-              <AlertTriangle className="w-4 h-4" />
-              {errorMsg}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
   // --- RENDER : TABLEAU DE BORD ---
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500">
-      {/* --- ZONE DE DEBUG TEMPORAIRE (A supprimer plus tard) --- */}
-      {debugData && (
-        <div className="bg-gray-800 text-green-400 p-4 m-4 rounded font-mono text-xs overflow-auto max-h-60 border-2 border-green-500 shadow-xl">
-            <h3 className="font-bold text-white mb-2 text-sm border-b border-gray-600 pb-1">
-                📡 TEST CONNEXION SNOWFLAKE SÉCURISÉE
-            </h3>
-            <pre>{JSON.stringify(debugData, null, 2)}</pre>
-        </div>
-      )}
-      {/* ------------------------------------------------------- */}
+      
       {/* HEADER */}
       <header className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="bg-blue-100 p-2 rounded-md">
-            <Activity className="w-5 h-5 text-blue-600" />
+            {isLoading ? <Loader className="w-5 h-5 text-blue-600 animate-spin" /> : <Activity className="w-5 h-5 text-blue-600" />}
           </div>
           <div>
             <h1 className="text-lg font-bold text-slate-800 leading-tight">Pilotage Migrations</h1>
@@ -581,7 +397,7 @@ function MigrationDashboard() {
         </div>
         
         <div className="flex gap-2 items-center">
-                <UserButton />
+            <UserButton />
             <div className="relative">
                 <Filter className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
                 <select 
@@ -607,6 +423,7 @@ function MigrationDashboard() {
         </div>
       </header>
 
+      {/* KPI GRID */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         {/* Jauge Pipe Planning */}
         <div 
@@ -626,7 +443,7 @@ function MigrationDashboard() {
                <RadialBarChart 
                  innerRadius="70%" outerRadius="100%" 
                  barSize={4} 
-                 data={[{name: 'ready', value: planningCount, fill: '#4f46e5'}]} 
+                 data={[{name: 'ready', value: planningCount || 1, fill: '#4f46e5'}]} 
                  startAngle={90} endAngle={-270}
                >
                  <RadialBar background dataKey="value" cornerRadius={10} />
@@ -664,6 +481,7 @@ function MigrationDashboard() {
         />
       </div>
 
+      {/* GRAPHIQUE PRINCIPAL */}
       <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 mb-4">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
@@ -730,6 +548,7 @@ function MigrationDashboard() {
         </div>
       </div>
 
+      {/* TABLEAU RÉCAPITULATIF */}
       <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden mb-4">
         <button 
           onClick={() => setIsTableExpanded(!isTableExpanded)}
@@ -778,6 +597,7 @@ function MigrationDashboard() {
         )}
       </div>
 
+      {/* GRAPHIQUES SECONDAIRES */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100">
             <h2 className="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
@@ -827,6 +647,7 @@ function MigrationDashboard() {
         </div>
       </div>
 
+      {/* LISTE DÉTAILLÉE */}
       <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden mb-8">
         <button 
           onClick={() => setIsDetailListExpanded(!isDetailListExpanded)}
@@ -896,9 +717,8 @@ function MigrationDashboard() {
     </div>
   );
 }
-// --- LE NOUVEAU GARDIEN DE SÉCURITÉ ---
-// C'est lui qui devient le "Chef" de l'application (export default)
 
+// --- LE NOUVEAU GARDIEN DE SÉCURITÉ ---
 export default function App() {
   if (!clerkPubKey) {
     return (
@@ -910,12 +730,9 @@ export default function App() {
 
   return (
     <ClerkProvider publishableKey={clerkPubKey}>
-      {/* Si l'utilisateur est connecté, on affiche ton Dashboard */}
       <SignedIn>
         <MigrationDashboard />
       </SignedIn>
-
-      {/* Si l'utilisateur n'est PAS connecté, on le force à se connecter */}
       <SignedOut>
         <RedirectToSignIn />
       </SignedOut>
