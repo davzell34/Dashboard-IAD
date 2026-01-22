@@ -6,7 +6,7 @@ import {
 import { 
   Activity, Users, Clock, TrendingUp, AlertTriangle, CheckCircle, 
   Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Loader,
-  ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight
+  ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout
 } from 'lucide-react';
 import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
 
@@ -33,16 +33,27 @@ const formatMonth = (dateStr) => {
   if (!dateStr) return '';
   const [year, month] = dateStr.split('-');
   const date = new Date(parseInt(year), parseInt(month) - 1, 1);
-  return date.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+  return date.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }); // Ex: "janvier 2025"
 };
 
-// Fonction pour obtenir le numéro de semaine et le label
+const formatMonthShort = (dateStr) => {
+    if (!dateStr) return '';
+    const [year, month] = dateStr.split('-');
+    const date = new Date(parseInt(year), parseInt(month) - 1, 1);
+    return date.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }); // Ex: "janv. 25"
+  };
+
 const getWeekLabel = (dateStr) => {
     const date = new Date(dateStr);
     const firstDayOfYear = new Date(date.getFullYear(), 0, 1);
     const pastDaysOfYear = (date - firstDayOfYear) / 86400000;
     const weekNum = Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
     return `S${weekNum}`;
+};
+
+const getCurrentMonthKey = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
 
 // --- COMPOSANTS UI ---
@@ -95,14 +106,15 @@ function MigrationDashboard() {
   
   const [isLoading, setIsLoading] = useState(true);
   
+  // Navigation & Filtres
   const [selectedTech, setSelectedTech] = useState('Tous');
-  const [selectedMonth, setSelectedMonth] = useState(null);
+  const [selectedMonth, setSelectedMonth] = useState(null); // null = Vue Annuelle, "YYYY-MM" = Vue Hebdo
   const [showPlanning, setShowPlanning] = useState(false); 
 
   // Accordeons
   const [isDetailListExpanded, setIsDetailListExpanded] = useState(true);
   const [isTableExpanded, setIsTableExpanded] = useState(false); 
-  const [isTechChartExpanded, setIsTechChartExpanded] = useState(true); // Ouvert par défaut en bas
+  const [isTechChartExpanded, setIsTechChartExpanded] = useState(true); 
 
   // Tri
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
@@ -120,13 +132,9 @@ function MigrationDashboard() {
           headers: { Authorization: `Bearer ${token}` }
         });
 
-        if (!response.ok) {
-            throw new Error(`Erreur API`);
-        }
+        if (!response.ok) throw new Error(`Erreur API`);
 
         const json = await response.json();
-        console.log("✅ Données reçues");
-
         if (json.backoffice) setBackofficeData(json.backoffice); 
         if (json.encours) setEncoursData(json.encours);
 
@@ -141,17 +149,18 @@ function MigrationDashboard() {
   
   // --- TRAITEMENT CORE ---
 
-  const { detailedData, eventsData, planningCount } = useMemo(() => {
+  const { detailedData, eventsData, planningCount, availableMonths } = useMemo(() => {
     if (backofficeData.length === 0 && encoursData.length === 0) {
-        return { detailedData: [], eventsData: [], planningCount: 0 };
+        return { detailedData: [], eventsData: [], planningCount: 0, availableMonths: [] };
     }
 
     const events = [];
     const planningEventsList = [];
     const monthlyStats = new Map();
+    const monthsSet = new Set(); // Pour la liste déroulante
 
-    // Helper pour ajouter aux stats mensuelles (servira pour la vue globale)
     const addToStats = (month, tech, besoin, besoin_encours, capacite) => {
+        monthsSet.add(month);
         const key = `${month}_${tech}`;
         if (!monthlyStats.has(key)) {
             monthlyStats.set(key, { month, tech, besoin: 0, besoin_encours: 0, capacite: 0 });
@@ -178,13 +187,10 @@ function MigrationDashboard() {
       
       let dateStr = dateEvent; 
       if (!dateStr) return;
-      
       if (dateStr.includes('/')) {
          const parts = dateStr.split(' ')[0].split('/');
          if (parts.length === 3) dateStr = `${parts[2]}-${parts[1]}-${parts[0]}`; 
-      } else if (dateStr.includes('T')) {
-          dateStr = dateStr.split('T')[0]; 
-      }
+      } else if (dateStr.includes('T')) dateStr = dateStr.split('T')[0]; 
       
       const month = dateStr.substring(0, 7);
       const tech = normalizeTechName(resp, techList);
@@ -200,10 +206,7 @@ function MigrationDashboard() {
           }
       }
 
-      let besoin = 0;
-      let capacite = 0;
-      let color = 'gray';
-      let status = '';
+      let besoin = 0; let capacite = 0; let color = 'gray'; let status = '';
 
       if (typeEvent === 'Tache de backoffice Avocatmail') {
         capacite = duration;
@@ -227,7 +230,6 @@ function MigrationDashboard() {
         duration: Math.max(besoin, capacite),
         status,
         color,
-        // Pour l'agrégation hebdo, on garde les valeurs brutes
         raw_besoin: besoin,
         raw_capacite: capacite,
         raw_besoin_encours: 0
@@ -289,17 +291,17 @@ function MigrationDashboard() {
     });
 
     const detailedDataArray = Array.from(monthlyStats.values()).sort((a, b) => a.month.localeCompare(b.month));
-    const allEvents = [...planningEventsList, ...events];
+    const sortedMonths = Array.from(monthsSet).sort().reverse(); // Plus récent en premier
 
     return {
         detailedData: detailedDataArray,
-        eventsData: allEvents,
-        planningCount: planningEventsList.length
+        eventsData: [...planningEventsList, ...events],
+        planningCount: planningEventsList.length,
+        availableMonths: sortedMonths
     };
   }, [backofficeData, encoursData, techList]);
 
-  // --- LOGIQUE D'AFFICHAGE & TRI ---
-
+  // --- LOGIQUE TRI ---
   const handleSort = (key) => {
     let direction = 'asc';
     if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
@@ -331,16 +333,14 @@ function MigrationDashboard() {
     return events;
   }, [selectedTech, selectedMonth, showPlanning, eventsData, sortConfig]);
 
-  // --- AGREGATION MENSUELLE ---
+  // --- AGREGATION MENSUELLE (VUE ANNUELLE) ---
   const monthlyAggregatedData = useMemo(() => {
     if (detailedData.length === 0) return [];
     
-    // Filtrer d'abord par tech si nécessaire
     const dataToUse = selectedTech === 'Tous' ? detailedData : detailedData.filter(d => d.tech === selectedTech);
-
     const aggMap = new Map();
     dataToUse.forEach(item => {
-      if (!aggMap.has(item.month)) aggMap.set(item.month, { month: item.month, label: formatMonth(item.month), besoin: 0, besoin_encours: 0, capacite: 0 });
+      if (!aggMap.has(item.month)) aggMap.set(item.month, { month: item.month, label: formatMonthShort(item.month), besoin: 0, besoin_encours: 0, capacite: 0 });
       const entry = aggMap.get(item.month);
       entry.besoin += item.besoin;
       entry.besoin_encours += item.besoin_encours;
@@ -356,7 +356,7 @@ function MigrationDashboard() {
     const result = [];
     while (current <= end) {
         const mStr = current.toISOString().substring(0, 7);
-        const data = aggMap.get(mStr) || { month: mStr, label: formatMonth(mStr), besoin: 0, besoin_encours: 0, capacite: 0 };
+        const data = aggMap.get(mStr) || { month: mStr, label: formatMonthShort(mStr), besoin: 0, besoin_encours: 0, capacite: 0 };
         const totalBesoinMois = data.besoin + data.besoin_encours;
         result.push({
             ...data,
@@ -368,48 +368,34 @@ function MigrationDashboard() {
     return result;
   }, [detailedData, selectedTech]);
 
-  // --- NOUVEAU : AGREGATION HEBDOMADAIRE (DYNAMIQUE) ---
+  // --- AGREGATION HEBDOMADAIRE (VUE DETAIL) ---
   const weeklyAggregatedData = useMemo(() => {
       if (!selectedMonth) return [];
-
-      // On repart des événements bruts pour pouvoir les grouper par semaine
-      // On filtre par mois ET par Tech
       let relevantEvents = eventsData.filter(e => e.date !== "N/A" && e.date.startsWith(selectedMonth));
-      if (selectedTech !== 'Tous') {
-          relevantEvents = relevantEvents.filter(e => e.tech === selectedTech);
-      }
+      if (selectedTech !== 'Tous') relevantEvents = relevantEvents.filter(e => e.tech === selectedTech);
 
       const weekMap = new Map();
-
       relevantEvents.forEach(evt => {
           const weekLabel = getWeekLabel(evt.date);
-          if (!weekMap.has(weekLabel)) {
-              weekMap.set(weekLabel, { month: weekLabel, label: weekLabel, besoin: 0, besoin_encours: 0, capacite: 0 });
-          }
+          if (!weekMap.has(weekLabel)) weekMap.set(weekLabel, { month: weekLabel, label: weekLabel, besoin: 0, besoin_encours: 0, capacite: 0 });
           const entry = weekMap.get(weekLabel);
-          // On utilise les propriétés brutes qu'on a ajoutées dans le traitement initial
           entry.besoin += (evt.raw_besoin || 0);
           entry.besoin_encours += (evt.raw_besoin_encours || 0);
           entry.capacite += (evt.raw_capacite || 0);
       });
 
-      // Tri des semaines (S1, S2, S10...)
       return Array.from(weekMap.values()).sort((a, b) => {
           const numA = parseInt(a.label.replace('S', ''));
           const numB = parseInt(b.label.replace('S', ''));
           return numA - numB;
       });
-
   }, [eventsData, selectedMonth, selectedTech]);
 
-  // --- DONNEES DU GRAPHIQUE PRINCIPAL (SWITCH MOIS/SEMAINES) ---
   const mainChartData = selectedMonth ? weeklyAggregatedData : monthlyAggregatedData;
 
-  // --- AGREGATION PAR TECH (GLOBAL OU FILTRÉ PAR MOIS) ---
+  // --- AGREGATION PAR TECH ---
   const techAggregatedData = useMemo(() => {
     const aggMap = new Map();
-    // On utilise les événements filtrés (qui respectent déjà le mois sélectionné s'il y en a un)
-    // Mais on ignore le filtre "selectedTech" car ce graphique compare les techs entre eux
     let eventsToUse = eventsData.filter(e => e.date !== "N/A");
     if(selectedMonth) eventsToUse = eventsToUse.filter(e => e.date.startsWith(selectedMonth));
 
@@ -426,27 +412,32 @@ function MigrationDashboard() {
   // KPI STATS
   const kpiStats = useMemo(() => {
     if (mainChartData.length === 0) return { besoin: 0, capacite: 0, ratio: 0 };
-    
-    // Somme sur la vue actuelle (soit tous les mois, soit toutes les semaines du mois)
     const totalBesoin = mainChartData.reduce((acc, curr) => acc + (curr.totalBesoinMois || (curr.besoin + curr.besoin_encours)), 0);
     const totalCapacite = mainChartData.reduce((acc, curr) => acc + curr.capacite, 0);
     const ratio = totalBesoin > 0 ? (totalCapacite / totalBesoin) * 100 : 0;
-
     return { besoin: totalBesoin, capacite: totalCapacite, ratio };
   }, [mainChartData]);
 
   // Handlers
   const handleChartClick = (data) => {
-    if (data && data.activeLabel) {
-       // Si on est en vue annuelle (label contient une date ou un mois normal, pas "Sxx")
-       // On check si c'est un format YYYY-MM
-       if (!selectedMonth) {
-           // data.activeLabel est "2025-01" par exemple (via dataKey="month")
-           // Le composant XAxis a dataKey="month", donc on reçoit "2025-01"
-           setSelectedMonth(data.activeLabel);
-           setShowPlanning(false); 
-       }
+    if (data && data.activeLabel && !selectedMonth) {
+       setSelectedMonth(data.activeLabel);
+       setShowPlanning(false); 
     }
+  };
+
+  const toggleViewMode = (mode) => {
+      setShowPlanning(false);
+      if (mode === 'months') {
+          setSelectedMonth(null);
+      } else {
+          // Si on veut passer en semaine sans mois sélectionné, on prend le mois en cours ou le premier dispo
+          if (!selectedMonth) {
+              const current = getCurrentMonthKey();
+              // Vérifier si le mois courant est dans les données, sinon prendre le premier dispo
+              setSelectedMonth(availableMonths.includes(current) ? current : availableMonths[0]);
+          }
+      }
   };
 
   return (
@@ -460,42 +451,27 @@ function MigrationDashboard() {
           </div>
           <div>
             <h1 className="text-lg font-bold text-slate-800 leading-tight">Pilotage Migrations</h1>
-            <p className="text-xs text-slate-500 flex items-center gap-2">
-               {selectedTech === 'Tous' ? "Vue Équipe" : `Focus: ${selectedTech}`}
-            </p>
+            <p className="text-xs text-slate-500 flex items-center gap-2">{selectedTech === 'Tous' ? "Vue Équipe" : `Focus: ${selectedTech}`}</p>
           </div>
         </div>
-        
         <div className="flex gap-2 items-center">
             <UserButton />
             <div className="relative">
                 <Filter className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
                 <select 
                     value={selectedTech} 
-                    onChange={(e) => { setSelectedTech(e.target.value); setSelectedMonth(null); setShowPlanning(false); }}
+                    onChange={(e) => { setSelectedTech(e.target.value); }}
                     className="pl-7 pr-3 py-1.5 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
                 >
                     <option value="Tous">Tous les techs</option>
-                    {techList.map(tech => (
-                        <option key={tech} value={tech}>{tech}</option>
-                    ))}
+                    {techList.map(tech => (<option key={tech} value={tech}>{tech}</option>))}
                 </select>
             </div>
-            {(selectedMonth || showPlanning) && (
-              <button 
-                onClick={() => { setSelectedMonth(null); setShowPlanning(false); }}
-                className="flex items-center gap-1 bg-red-50 text-red-600 px-3 py-1.5 rounded-md text-xs font-medium hover:bg-red-100 transition-colors border border-red-100"
-              >
-                <X className="w-3 h-3" />
-                Retour Vue Globale
-              </button>
-            )}
         </div>
       </header>
 
       {/* KPI GRID */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-        {/* Jauge Pipe Planning */}
         <div 
             onClick={() => { setShowPlanning(!showPlanning); setSelectedMonth(null); }}
             className={`px-4 py-3 rounded-lg shadow-sm border flex items-center justify-between cursor-pointer transition-all duration-200 
@@ -519,52 +495,52 @@ function MigrationDashboard() {
              </div>
            </div>
         </div>
-
-        <KPICard 
-          title="Besoin Total (h)" 
-          value={kpiStats.besoin.toFixed(0)} 
-          subtext={selectedMonth ? "Sur le mois" : "Annuel"}
-          icon={Users} 
-          colorClass="text-slate-600"
-          active={!!selectedMonth}
-        />
-        <KPICard 
-          title="Capacité (h)" 
-          value={kpiStats.capacite.toFixed(0)} 
-          subtext="Planifiée"
-          icon={Clock} 
-          colorClass="text-purple-600" 
-          active={!!selectedMonth}
-        />
-         <KPICard 
-          title="Taux Couverture" 
-          value={`${kpiStats.ratio.toFixed(0)}%`} 
-          subtext="Capa. / Besoin"
-          icon={TrendingUp} 
-          colorClass={kpiStats.ratio >= 100 ? "text-emerald-600" : "text-red-600"}
-          active={!!selectedMonth}
-        />
+        <KPICard title="Besoin Total (h)" value={kpiStats.besoin.toFixed(0)} subtext={selectedMonth ? "Sur le mois" : "Annuel"} icon={Users} colorClass="text-slate-600" active={!!selectedMonth}/>
+        <KPICard title="Capacité (h)" value={kpiStats.capacite.toFixed(0)} subtext="Planifiée" icon={Clock} colorClass="text-purple-600" active={!!selectedMonth}/>
+        <KPICard title="Taux Couverture" value={`${kpiStats.ratio.toFixed(0)}%`} subtext="Capa. / Besoin" icon={TrendingUp} colorClass={kpiStats.ratio >= 100 ? "text-emerald-600" : "text-red-600"} active={!!selectedMonth}/>
       </div>
 
       {/* GRAPHIQUE PRINCIPAL (INTERACTIF) */}
       <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 mb-4">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-3">
-             <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                <BarChart2 className="w-4 h-4 text-slate-400" />
-                Performance {selectedMonth ? `Hebdomadaire : ${formatMonth(selectedMonth)}` : "Mensuelle (Globale)"}
-             </h2>
-             {selectedMonth && (
-                 <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full flex items-center gap-1">
-                     <CornerDownRight size={10} /> Vue détaillée activée
-                 </span>
-             )}
-          </div>
-          <div className="flex gap-3 text-[10px] font-medium uppercase tracking-wider text-slate-500">
-            <div className="flex items-center gap-1"><span className="w-2 h-2 bg-cyan-500 rounded-full"></span> Besoin (Nouv.)</div>
-            <div className="flex items-center gap-1"><span className="w-2 h-2 bg-amber-500 rounded-full"></span> En Cours</div>
-            <div className="flex items-center gap-1"><span className="w-2 h-2 bg-purple-500 rounded-full"></span> Capacité</div>
-          </div>
+        
+        {/* HEADER GRAPHIQUE AVEC TOGGLE */}
+        <div className="flex flex-col sm:flex-row items-center justify-between mb-4 gap-4">
+            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">
+                <button 
+                    onClick={() => toggleViewMode('months')}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${!selectedMonth ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                    Vue Annuelle (Mois)
+                </button>
+                <button 
+                    onClick={() => toggleViewMode('weeks')}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${selectedMonth ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                    Vue Détaillée (Semaines)
+                </button>
+            </div>
+
+            {/* Si Vue Semaine active, afficher le sélecteur de mois */}
+            {selectedMonth && (
+                <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-200">
+                    <span className="text-xs text-slate-500 font-medium">Mois :</span>
+                    <select 
+                        value={selectedMonth}
+                        onChange={(e) => setSelectedMonth(e.target.value)}
+                        className="text-sm border border-slate-200 rounded-md py-1 px-2 focus:ring-blue-500 bg-white"
+                    >
+                        {availableMonths.map(m => (
+                            <option key={m} value={m}>{formatMonth(m)}</option>
+                        ))}
+                    </select>
+                </div>
+            )}
+
+            <div className="flex gap-3 text-[10px] font-medium uppercase tracking-wider text-slate-500 ml-auto">
+                <div className="flex items-center gap-1"><span className="w-2 h-2 bg-cyan-500 rounded-full"></span> Besoin</div>
+                <div className="flex items-center gap-1"><span className="w-2 h-2 bg-amber-500 rounded-full"></span> En Cours</div>
+                <div className="flex items-center gap-1"><span className="w-2 h-2 bg-purple-500 rounded-full"></span> Capacité</div>
+            </div>
         </div>
         
         <div className="h-64 w-full cursor-pointer">
@@ -575,14 +551,13 @@ function MigrationDashboard() {
               onClick={handleChartClick}
             >
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              {/* Note: dataKey="month" contient "2025-01" en vue mensuelle OU "S01" en vue hebdo (via la prop 'month' qu'on a mis dans weeklyAggregatedData) */}
               <XAxis 
                 dataKey="month" 
                 axisLine={false} 
                 tickLine={false} 
                 tick={{fill: '#64748b', fontSize: 10}} 
                 dy={5} 
-                tickFormatter={(val) => val.includes('-') ? formatMonth(val) : val} // Formatte si date, sinon laisse S01
+                tickFormatter={(val) => val.includes('-') ? formatMonthShort(val) : val}
                 interval={0} 
               />
               <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} />
@@ -596,17 +571,13 @@ function MigrationDashboard() {
                 ]}
               />
               
-              <Bar stackId="a" dataKey="besoin" fill="#06b6d4" radius={[0, 0, 0, 0]} barSize={selectedMonth ? 30 : 16}>
-                 {/* Pas de Cell nécessaire ici car la couleur est unie, sauf si on veut highlight */}
-              </Bar>
+              <Bar stackId="a" dataKey="besoin" fill="#06b6d4" radius={[0, 0, 0, 0]} barSize={selectedMonth ? 30 : 16} />
               <Bar stackId="a" dataKey="besoin_encours" fill="#f59e0b" radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
-
               <Bar stackId="b" dataKey="capacite" fill="#a855f7" radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
               
             </ComposedChart>
           </ResponsiveContainer>
         </div>
-        {!selectedMonth && <p className="text-[10px] text-center text-slate-400 italic mt-1">Cliquez sur un mois pour voir le détail par semaine</p>}
       </div>
 
       {/* --- LISTE DÉTAILLÉE --- */}
@@ -691,7 +662,7 @@ function MigrationDashboard() {
               <tbody className="divide-y divide-slate-100">
                 {monthlyAggregatedData.map((row) => (
                   <tr key={row.month} className={`hover:bg-slate-50 transition-colors ${selectedMonth === row.month ? 'bg-blue-50/50' : ''}`}>
-                    <td className="px-4 py-2 font-medium text-slate-800 capitalize">{row.formattedMonth}</td>
+                    <td className="px-4 py-2 font-medium text-slate-800 capitalize">{row.label}</td>
                     <td className="px-4 py-2 text-right">{row.totalBesoinMois.toFixed(1)} h</td>
                     <td className="px-4 py-2 text-right text-amber-500">{row.besoin_encours > 0 ? `${row.besoin_encours.toFixed(1)} h` : '-'}</td>
                     <td className="px-4 py-2 text-right text-purple-600 font-medium">{row.capacite.toFixed(1)} h</td>
