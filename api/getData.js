@@ -1,14 +1,30 @@
+import { verifyToken } from '@clerk/backend';
 const snowflake = require('snowflake-sdk');
 
 export default async function handler(request, response) {
   
-  // 1. SÉCURITÉ
+  // --- 1. SÉCURITÉ RENFORCÉE 👮‍♂️ ---
+  // On vérifie non seulement la présence du token, mais aussi sa validité cryptographique
   const authHeader = request.headers.authorization;
+
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return response.status(401).json({ error: 'Accès refusé ⛔' });
+    return response.status(401).json({ error: 'Accès refusé ⛔ : Aucun token fourni.' });
   }
 
-  // 2. CONNEXION
+  const token = authHeader.split(' ')[1];
+
+  try {
+    // Vérification de la signature du token auprès de Clerk
+    // Cela garantit que le token a bien été généré par votre application et n'a pas expiré
+    await verifyToken(token, {
+      secretKey: process.env.CLERK_SECRET_KEY,
+    });
+  } catch (error) {
+    console.error("Token invalide:", error);
+    return response.status(401).json({ error: 'Accès refusé ⛔ : Token invalide ou expiré.' });
+  }
+
+  // --- 2. CONNEXION SNOWFLAKE ---
   const connection = snowflake.createConnection({
     account: process.env.SNOWFLAKE_ACCOUNT,
     username: process.env.SNOWFLAKE_USERNAME,
@@ -49,7 +65,6 @@ export default async function handler(request, response) {
         `;
 
         // --- REQUÊTE 2 : EN COURS (Tickets actifs 2025-2026) ---
-        // On filtre ici sur DERNIERE_ACTION pour rester cohérent
         const sqlEncours = `
             SELECT 
                 ETAT_PRIORITE,
