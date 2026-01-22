@@ -6,7 +6,7 @@ import {
 import { 
   Activity, Users, Clock, TrendingUp, AlertTriangle, CheckCircle, 
   Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Loader,
-  ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout
+  ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout, Search, Layers
 } from 'lucide-react';
 import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
 
@@ -20,7 +20,6 @@ const normalizeTechName = (name, techList) => {
   if (!name || typeof name !== 'string') return "Inconnu";
   const cleanName = name.trim();
   const upperName = cleanName.toUpperCase();
-  
   for (const tech of techList) {
     if (tech.toUpperCase() === upperName) return tech;
     const lastName = tech.split(' ').pop().toUpperCase();
@@ -33,15 +32,15 @@ const formatMonth = (dateStr) => {
   if (!dateStr) return '';
   const [year, month] = dateStr.split('-');
   const date = new Date(parseInt(year), parseInt(month) - 1, 1);
-  return date.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }); // Ex: "janvier 2025"
+  return date.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
 };
 
 const formatMonthShort = (dateStr) => {
     if (!dateStr) return '';
     const [year, month] = dateStr.split('-');
     const date = new Date(parseInt(year), parseInt(month) - 1, 1);
-    return date.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }); // Ex: "janv. 25"
-  };
+    return date.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+};
 
 const getWeekLabel = (dateStr) => {
     const date = new Date(dateStr);
@@ -103,18 +102,17 @@ function MigrationDashboard() {
   const [backofficeData, setBackofficeData] = useState([]);
   const [encoursData, setEncoursData] = useState([]);
   const [techList, setTechList] = useState(TECH_LIST_DEFAULT);
-  
   const [isLoading, setIsLoading] = useState(true);
   
   // Navigation & Filtres
   const [selectedTech, setSelectedTech] = useState('Tous');
-  const [selectedMonth, setSelectedMonth] = useState(null); // null = Vue Annuelle, "YYYY-MM" = Vue Hebdo
+  const [selectedMonth, setSelectedMonth] = useState(null);
   const [showPlanning, setShowPlanning] = useState(false); 
 
-  // Accordeons
+  // Accordeons (États d'affichage)
   const [isDetailListExpanded, setIsDetailListExpanded] = useState(true);
   const [isTableExpanded, setIsTableExpanded] = useState(false); 
-  const [isTechChartExpanded, setIsTechChartExpanded] = useState(true); 
+  const [isTechChartExpanded, setIsTechChartExpanded] = useState(false); // REPLIÉ PAR DÉFAUT
 
   // Tri
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
@@ -123,21 +121,17 @@ function MigrationDashboard() {
 
   useEffect(() => {
     const fetchData = async () => {
-      console.log("🔒 Connexion Snowflake en cours...");
       setIsLoading(true);
-
       try {
         const token = await getToken();
         const response = await fetch('/api/getData', {
           headers: { Authorization: `Bearer ${token}` }
         });
-
         if (!response.ok) throw new Error(`Erreur API`);
-
         const json = await response.json();
+        
         if (json.backoffice) setBackofficeData(json.backoffice); 
         if (json.encours) setEncoursData(json.encours);
-
         setIsLoading(false);
       } catch (err) {
         console.error("❌ Erreur API :", err);
@@ -149,15 +143,19 @@ function MigrationDashboard() {
   
   // --- TRAITEMENT CORE ---
 
-  const { detailedData, eventsData, planningCount, availableMonths } = useMemo(() => {
+  const { detailedData, eventsData, planningCount, analysisPipeCount, availableMonths } = useMemo(() => {
     if (backofficeData.length === 0 && encoursData.length === 0) {
-        return { detailedData: [], eventsData: [], planningCount: 0, availableMonths: [] };
+        return { detailedData: [], eventsData: [], planningCount: 0, analysisPipeCount: 0, availableMonths: [] };
     }
 
     const events = [];
     const planningEventsList = [];
     const monthlyStats = new Map();
-    const monthsSet = new Set(); // Pour la liste déroulante
+    const monthsSet = new Set(); 
+
+    // Compteurs pour les pipes
+    let countReadyMiseEnPlace = 0;
+    let countReadyAnalyse = 0; // Nouveau compteur pour le 2ème pipe
 
     const addToStats = (month, tech, besoin, besoin_encours, capacite) => {
         monthsSet.add(month);
@@ -246,17 +244,25 @@ function MigrationDashboard() {
         const clientName = cleanRow['INTERLOCUTEUR'] || 'Client Inconnu';
         const tech = normalizeTechName(techNameRaw, techList);
         
+        // --- LOGIQUE PIPE ---
         if (categorie === 'Prêt pour mise en place') {
+            countReadyMiseEnPlace++;
             planningEventsList.push({
-                date: "N/A",
-                tech,
-                client: clientName,
-                type: "Prêt pour Mise en Place",
-                duration: 0,
-                status: "A Planifier",
-                color: "indigo"
+                date: "N/A", tech, client: clientName, type: "Prêt pour Mise en Place",
+                duration: 0, status: "A Planifier (Migr)", color: "indigo"
             });
             return;
+        }
+        
+        // --- LOGIQUE PIPE ANALYSE (Filtre temporaire ou à adapter) ---
+        // Adapte ce test quand tu auras le critère exact pour "Prêt pour analyse"
+        if (categorie === 'Prêt pour analyse' || categorie === 'A Planifier (Analyse)') {
+            countReadyAnalyse++;
+            planningEventsList.push({
+                date: "N/A", tech, client: clientName, type: "Prêt pour Analyse",
+                duration: 0, status: "A Planifier (Analyse)", color: "cyan"
+            });
+            // return; // Si on ne veut pas le traiter comme "En cours"
         }
 
         if (lastAction) {
@@ -291,12 +297,13 @@ function MigrationDashboard() {
     });
 
     const detailedDataArray = Array.from(monthlyStats.values()).sort((a, b) => a.month.localeCompare(b.month));
-    const sortedMonths = Array.from(monthsSet).sort().reverse(); // Plus récent en premier
+    const sortedMonths = Array.from(monthsSet).sort().reverse(); 
 
     return {
         detailedData: detailedDataArray,
         eventsData: [...planningEventsList, ...events],
-        planningCount: planningEventsList.length,
+        planningCount: countReadyMiseEnPlace,
+        analysisPipeCount: countReadyAnalyse, // Nouveau compteur
         availableMonths: sortedMonths
     };
   }, [backofficeData, encoursData, techList]);
@@ -311,7 +318,9 @@ function MigrationDashboard() {
   const filteredAndSortedEvents = useMemo(() => {
     let events = eventsData;
     if (selectedTech !== 'Tous') events = events.filter(e => e.tech === selectedTech);
-    if (showPlanning) events = events.filter(e => e.status === "A Planifier");
+    
+    // Filtrage spécial pour le bouton Planning : on montre les deux types de "A Planifier"
+    if (showPlanning) events = events.filter(e => e.status.includes("A Planifier"));
     else if (selectedMonth) events = events.filter(e => e.date !== "N/A" && e.date.startsWith(selectedMonth));
     else events = events.filter(e => e.date !== "N/A");
 
@@ -431,10 +440,8 @@ function MigrationDashboard() {
       if (mode === 'months') {
           setSelectedMonth(null);
       } else {
-          // Si on veut passer en semaine sans mois sélectionné, on prend le mois en cours ou le premier dispo
           if (!selectedMonth) {
               const current = getCurrentMonthKey();
-              // Vérifier si le mois courant est dans les données, sinon prendre le premier dispo
               setSelectedMonth(availableMonths.includes(current) ? current : availableMonths[0]);
           }
       }
@@ -467,34 +474,57 @@ function MigrationDashboard() {
                     {techList.map(tech => (<option key={tech} value={tech}>{tech}</option>))}
                 </select>
             </div>
+            {(selectedMonth || showPlanning) && (
+              <button 
+                onClick={() => { setSelectedMonth(null); setShowPlanning(false); }}
+                className="flex items-center gap-1 bg-red-50 text-red-600 px-3 py-1.5 rounded-md text-xs font-medium hover:bg-red-100 transition-colors border border-red-100"
+              >
+                <X className="w-3 h-3" /> Retour Vue Globale
+              </button>
+            )}
         </div>
       </header>
 
       {/* KPI GRID */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        {/* DOUBLE PIPE (PLANNING) */}
         <div 
             onClick={() => { setShowPlanning(!showPlanning); setSelectedMonth(null); }}
-            className={`px-4 py-3 rounded-lg shadow-sm border flex items-center justify-between cursor-pointer transition-all duration-200 
+            className={`px-4 py-2 rounded-lg shadow-sm border flex items-center justify-between cursor-pointer transition-all duration-200 
             ${showPlanning ? 'bg-indigo-50 border-indigo-200 ring-2 ring-indigo-100' : 'bg-white border-slate-100 hover:bg-slate-50'}`}
         >
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Pipe Planning</p>
-            <div className="flex items-baseline gap-2">
-              <h3 className="text-xl font-bold text-indigo-600">{planningCount}</h3>
-              <p className="text-xs font-medium text-slate-400">dossiers prêts</p>
+          <div className="flex-1">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Pipes Planning</p>
+            <div className="flex gap-4">
+                <div className="flex flex-col">
+                    <span className="text-lg font-bold text-indigo-600 leading-none">{planningCount}</span>
+                    <span className="text-[9px] text-slate-400">Prêt Migr.</span>
+                </div>
+                <div className="flex flex-col border-l pl-3 border-slate-100">
+                    <span className="text-lg font-bold text-cyan-600 leading-none">{analysisPipeCount}</span>
+                    <span className="text-[9px] text-slate-400">Prêt Anal.</span>
+                </div>
             </div>
           </div>
-           <div className="w-12 h-12 relative">
-             <ResponsiveContainer width="100%" height="100%">
-               <RadialBarChart innerRadius="70%" outerRadius="100%" barSize={4} data={[{name: 'ready', value: planningCount || 1, fill: '#4f46e5'}]} startAngle={90} endAngle={-270}>
-                 <RadialBar background dataKey="value" cornerRadius={10} />
-               </RadialBarChart>
-             </ResponsiveContainer>
-             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <Briefcase className={`w-4 h-4 ${showPlanning ? 'text-indigo-700' : 'text-indigo-500'}`} />
-             </div>
+           {/* Mini Jauges */}
+           <div className="flex gap-1">
+                <div className="w-8 h-8 relative">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <RadialBarChart innerRadius="60%" outerRadius="100%" barSize={3} data={[{value: planningCount||1, fill: '#4f46e5'}]} startAngle={90} endAngle={-270}>
+                            <RadialBar background dataKey="value" cornerRadius={10} />
+                        </RadialBarChart>
+                    </ResponsiveContainer>
+                </div>
+                <div className="w-8 h-8 relative">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <RadialBarChart innerRadius="60%" outerRadius="100%" barSize={3} data={[{value: analysisPipeCount||1, fill: '#06b6d4'}]} startAngle={90} endAngle={-270}>
+                            <RadialBar background dataKey="value" cornerRadius={10} />
+                        </RadialBarChart>
+                    </ResponsiveContainer>
+                </div>
            </div>
         </div>
+
         <KPICard title="Besoin Total (h)" value={kpiStats.besoin.toFixed(0)} subtext={selectedMonth ? "Sur le mois" : "Annuel"} icon={Users} colorClass="text-slate-600" active={!!selectedMonth}/>
         <KPICard title="Capacité (h)" value={kpiStats.capacite.toFixed(0)} subtext="Planifiée" icon={Clock} colorClass="text-purple-600" active={!!selectedMonth}/>
         <KPICard title="Taux Couverture" value={`${kpiStats.ratio.toFixed(0)}%`} subtext="Capa. / Besoin" icon={TrendingUp} colorClass={kpiStats.ratio >= 100 ? "text-emerald-600" : "text-red-600"} active={!!selectedMonth}/>
@@ -502,82 +532,39 @@ function MigrationDashboard() {
 
       {/* GRAPHIQUE PRINCIPAL (INTERACTIF) */}
       <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 mb-4">
-        
-        {/* HEADER GRAPHIQUE AVEC TOGGLE */}
         <div className="flex flex-col sm:flex-row items-center justify-between mb-4 gap-4">
             <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">
-                <button 
-                    onClick={() => toggleViewMode('months')}
-                    className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${!selectedMonth ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                    Vue Annuelle (Mois)
-                </button>
-                <button 
-                    onClick={() => toggleViewMode('weeks')}
-                    className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${selectedMonth ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                    Vue Détaillée (Semaines)
-                </button>
+                <button onClick={() => toggleViewMode('months')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${!selectedMonth ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Mois</button>
+                <button onClick={() => toggleViewMode('weeks')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${selectedMonth ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Semaines</button>
             </div>
-
-            {/* Si Vue Semaine active, afficher le sélecteur de mois */}
             {selectedMonth && (
                 <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-200">
                     <span className="text-xs text-slate-500 font-medium">Mois :</span>
-                    <select 
-                        value={selectedMonth}
-                        onChange={(e) => setSelectedMonth(e.target.value)}
-                        className="text-sm border border-slate-200 rounded-md py-1 px-2 focus:ring-blue-500 bg-white"
-                    >
-                        {availableMonths.map(m => (
-                            <option key={m} value={m}>{formatMonth(m)}</option>
-                        ))}
+                    <select value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="text-sm border border-slate-200 rounded-md py-1 px-2 focus:ring-blue-500 bg-white">
+                        {availableMonths.map(m => (<option key={m} value={m}>{formatMonth(m)}</option>))}
                     </select>
                 </div>
             )}
-
             <div className="flex gap-3 text-[10px] font-medium uppercase tracking-wider text-slate-500 ml-auto">
                 <div className="flex items-center gap-1"><span className="w-2 h-2 bg-cyan-500 rounded-full"></span> Besoin</div>
                 <div className="flex items-center gap-1"><span className="w-2 h-2 bg-amber-500 rounded-full"></span> En Cours</div>
                 <div className="flex items-center gap-1"><span className="w-2 h-2 bg-purple-500 rounded-full"></span> Capacité</div>
             </div>
         </div>
-        
         <div className="h-64 w-full cursor-pointer">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart 
-              data={mainChartData} 
-              margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-              onClick={handleChartClick}
-            >
+            <ComposedChart data={mainChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }} onClick={handleChartClick}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis 
-                dataKey="month" 
-                axisLine={false} 
-                tickLine={false} 
-                tick={{fill: '#64748b', fontSize: 10}} 
-                dy={5} 
-                tickFormatter={(val) => val.includes('-') ? formatMonthShort(val) : val}
-                interval={0} 
-              />
+              <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} dy={5} tickFormatter={(val) => val.includes('-') ? formatMonthShort(val) : val} interval={0} />
               <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} />
-              <Tooltip 
-                cursor={{ fill: 'rgba(0,0,0,0.05)' }}
-                contentStyle={{borderRadius: '6px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px', padding: '8px'}}
-                labelFormatter={(val) => val.includes('-') ? formatMonth(val) : `Semaine ${val.replace('S','')}`}
-                formatter={(value, name) => [
-                  `${parseFloat(value).toFixed(1)} h`, 
-                  name === 'besoin' ? 'Besoin (Nouv.)' : name === 'besoin_encours' ? 'Besoin (En cours)' : name === 'capacite' ? 'Capacité' : name
-                ]}
-              />
-              
+              <Tooltip cursor={{ fill: 'rgba(0,0,0,0.05)' }} contentStyle={{borderRadius: '6px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px', padding: '8px'}} labelFormatter={(val) => val.includes('-') ? formatMonth(val) : `Semaine ${val.replace('S','')}`} formatter={(value, name) => [`${parseFloat(value).toFixed(1)} h`, name === 'besoin' ? 'Besoin (Nouv.)' : name === 'besoin_encours' ? 'Besoin (En cours)' : name === 'capacite' ? 'Capacité' : name]} />
               <Bar stackId="a" dataKey="besoin" fill="#06b6d4" radius={[0, 0, 0, 0]} barSize={selectedMonth ? 30 : 16} />
               <Bar stackId="a" dataKey="besoin_encours" fill="#f59e0b" radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
               <Bar stackId="b" dataKey="capacite" fill="#a855f7" radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
-              
             </ComposedChart>
           </ResponsiveContainer>
         </div>
+        {!selectedMonth && <p className="text-[10px] text-center text-slate-400 italic mt-1">Cliquez sur un mois pour voir le détail par semaine</p>}
       </div>
 
       {/* --- LISTE DÉTAILLÉE --- */}
@@ -593,7 +580,6 @@ function MigrationDashboard() {
           </div>
           {isDetailListExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
         </button>
-        
         {isDetailListExpanded && (
           <div className="overflow-x-auto max-h-96">
             <table className="w-full text-xs text-left text-slate-600">
@@ -610,32 +596,61 @@ function MigrationDashboard() {
               <tbody className="divide-y divide-slate-100">
                 {filteredAndSortedEvents.map((event, index) => (
                   <tr key={index} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-2 py-1 font-medium text-slate-800 whitespace-nowrap">
-                      {event.date === "N/A" ? "En attente" : new Date(event.date).toLocaleDateString('fr-FR')}
-                    </td>
+                    <td className="px-2 py-1 font-medium text-slate-800 whitespace-nowrap">{event.date === "N/A" ? "En attente" : new Date(event.date).toLocaleDateString('fr-FR')}</td>
                     <td className="px-2 py-1 whitespace-nowrap truncate max-w-[150px]">{event.tech}</td>
                     <td className="px-2 py-1 font-medium text-slate-700 whitespace-nowrap truncate max-w-[200px]" title={event.client}>{event.client}</td>
                     <td className="px-2 py-1 text-slate-500 whitespace-nowrap">{event.type}</td>
                     <td className="px-2 py-1 text-right font-medium whitespace-nowrap">{event.duration > 0 ? event.duration.toFixed(2) : '-'}</td>
                     <td className="px-2 py-1 text-center whitespace-nowrap">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider
-                        ${event.color === 'cyan' ? 'bg-cyan-100 text-cyan-700' : event.color === 'purple' ? 'bg-purple-100 text-purple-700' : event.color === 'indigo' ? 'bg-indigo-100 text-indigo-700' : event.color === 'amber' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
-                        {event.status}
-                      </span>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${event.color === 'cyan' ? 'bg-cyan-100 text-cyan-700' : event.color === 'purple' ? 'bg-purple-100 text-purple-700' : event.color === 'indigo' ? 'bg-indigo-100 text-indigo-700' : event.color === 'amber' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>{event.status}</span>
                     </td>
                   </tr>
                 ))}
-                {filteredAndSortedEvents.length === 0 && (
-                  <tr><td colSpan="6" className="px-4 py-8 text-center text-slate-400 italic">Aucun événement trouvé pour cette sélection.</td></tr>
-                )}
+                {filteredAndSortedEvents.length === 0 && (<tr><td colSpan="6" className="px-4 py-8 text-center text-slate-400 italic">Aucun événement trouvé.</td></tr>)}
               </tbody>
             </table>
           </div>
         )}
       </div>
 
-      {/* --- TABLEAU MENSUEL (ACCORDÉON) --- */}
-      <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden mb-4">
+      {/* --- BLOC BAS : CHARGE TECH (50%) & TABLEAU MENSUEL (REPLIÉS) --- */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+        
+        {/* 1. CHARGE PAR TECH (Replié par défaut, 50% width) */}
+        <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden h-fit">
+            <button 
+                onClick={() => setIsTechChartExpanded(!isTechChartExpanded)}
+                className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors"
+            >
+                <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                    <Users className="w-4 h-4 text-slate-400" />
+                    Charge par Tech {selectedMonth ? `(${formatMonth(selectedMonth)})` : "(Globale)"}
+                </h2>
+                {isTechChartExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
+            </button>
+            {isTechChartExpanded && (
+                <div className="h-64 w-full p-4 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={techAggregatedData} layout="vertical" margin={{ top: 0, right: 10, left: 10, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
+                        <XAxis type="number" hide />
+                        <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fill: '#475569', fontSize: 10, fontWeight: 500}} width={120} />
+                        <Tooltip cursor={{fill: 'transparent'}} contentStyle={{borderRadius: '6px', fontSize: '12px'}} formatter={(value) => [`${parseFloat(value).toFixed(1)} h`, '']} />
+                        <Bar dataKey="besoin" fill="#06b6d4" barSize={12} stackId="a" radius={[0, 0, 0, 0]} />
+                        <Bar dataKey="besoin_encours" fill="#f59e0b" barSize={12} stackId="a" radius={[0, 2, 2, 0]} />
+                        <Bar dataKey="capacite" fill="#a855f7" barSize={12} radius={[0, 2, 2, 0]} stackId="b" />
+                        </BarChart>
+                    </ResponsiveContainer>
+                </div>
+            )}
+        </div>
+
+        {/* 2. ESPACE VIDE OU FUTUR WIDGET (Le tableau mensuel descend en dessous sur demande "Pas le au dessus") */}
+        <div className="hidden lg:block"></div> 
+      </div>
+
+      {/* --- TABLEAU MENSUEL (REPLIÉ PAR DÉFAUT, TOUTE LARGEUR) --- */}
+      <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden mb-8">
         <button 
           onClick={() => setIsTableExpanded(!isTableExpanded)}
           className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors"
@@ -646,7 +661,6 @@ function MigrationDashboard() {
           </h2>
           {isTableExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
         </button>
-        
         {isTableExpanded && (
           <div className="overflow-x-auto animate-in fade-in slide-in-from-top-2 duration-200">
             <table className="w-full text-sm text-left text-slate-600">
@@ -676,35 +690,6 @@ function MigrationDashboard() {
               </tbody>
             </table>
           </div>
-        )}
-      </div>
-
-      {/* --- CHARGE PAR TECH (TOUT EN BAS) --- */}
-      <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden h-fit mb-4">
-        <button 
-            onClick={() => setIsTechChartExpanded(!isTechChartExpanded)}
-            className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors"
-        >
-            <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                <Users className="w-4 h-4 text-slate-400" />
-                Charge par Tech {selectedMonth ? `(${formatMonth(selectedMonth)})` : "(Globale)"}
-            </h2>
-            {isTechChartExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
-        </button>
-        {isTechChartExpanded && (
-            <div className="h-64 w-full p-4 animate-in fade-in slide-in-from-top-2 duration-200">
-                <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={techAggregatedData} layout="vertical" margin={{ top: 0, right: 10, left: 10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
-                    <XAxis type="number" hide />
-                    <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fill: '#475569', fontSize: 10, fontWeight: 500}} width={120} />
-                    <Tooltip cursor={{fill: 'transparent'}} contentStyle={{borderRadius: '6px', fontSize: '12px'}} formatter={(value) => [`${parseFloat(value).toFixed(1)} h`, '']} />
-                    <Bar dataKey="besoin" fill="#06b6d4" barSize={12} stackId="a" radius={[0, 0, 0, 0]} />
-                    <Bar dataKey="besoin_encours" fill="#f59e0b" barSize={12} stackId="a" radius={[0, 2, 2, 0]} />
-                    <Bar dataKey="capacite" fill="#a855f7" barSize={12} radius={[0, 2, 2, 0]} stackId="b" />
-                    </BarChart>
-                </ResponsiveContainer>
-            </div>
         )}
       </div>
 
