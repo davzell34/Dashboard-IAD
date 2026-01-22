@@ -18,7 +18,7 @@ export default async function handler(request, response) {
     warehouse: process.env.SNOWFLAKE_WAREHOUSE
   });
 
-  // Fonction utilitaire pour exécuter une requête SQL proprement (Promesse)
+  // Fonction utilitaire pour exécuter une requête SQL proprement
   const runQuery = (conn, sql) => {
     return new Promise((resolve, reject) => {
       conn.execute({
@@ -48,7 +48,8 @@ export default async function handler(request, response) {
             ORDER BY DATE DESC
         `;
 
-        // --- REQUÊTE 2 : EN COURS (Tickets actifs) ---
+        // --- REQUÊTE 2 : EN COURS (Tickets actifs 2025-2026) ---
+        // On filtre ici sur DERNIERE_ACTION pour rester cohérent
         const sqlEncours = `
             SELECT 
                 ETAT_PRIORITE,
@@ -62,9 +63,10 @@ export default async function handler(request, response) {
                 CATEGORIE,
                 INTERLOCUTEUR
             FROM V_TICKETS_SERVICE_TECHNIQUE
+            WHERE DERNIERE_ACTION >= '2025-01-01' AND DERNIERE_ACTION <= '2026-12-31'
         `;
 
-        // Exécution séquentielle (plus sûr) ou parallèle
+        // Exécution séquentielle
         console.log("Exécution requête Backoffice...");
         const backofficeRows = await runQuery(conn, sqlBackoffice);
         
@@ -73,7 +75,7 @@ export default async function handler(request, response) {
 
         // Réponse combinée
         response.status(200).json({
-            message: "Données complètes récupérées ✅",
+            message: "Données 2025-2026 complètes récupérées ✅",
             backoffice: backofficeRows,
             encours: encoursRows
         });
