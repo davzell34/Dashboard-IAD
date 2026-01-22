@@ -60,7 +60,7 @@ const KPICard = ({ title, value, subtext, icon: Icon, colorClass, active, onClic
 function MigrationDashboard() {
   // États des données
   const [backofficeData, setBackofficeData] = useState([]);
-  const [encoursData, setEncoursData] = useState([]); // A voir si tu as une vue pour ça plus tard
+  const [encoursData, setEncoursData] = useState([]);
   const [techList, setTechList] = useState(TECH_LIST_DEFAULT);
   
   // États de chargement API & DEBUG
@@ -87,8 +87,6 @@ function MigrationDashboard() {
       try {
         const token = await getToken();
         
-        // --- APPEL API RÉEL ---
-        // Assure-toi que ton API renvoie bien les colonnes de la vue V_EVENEMENT_AVOCATMAIL
         const response = await fetch('/api/getData', {
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -100,14 +98,18 @@ function MigrationDashboard() {
 
         const json = await response.json();
         
-        // Debug pour vérifier les colonnes reçues
+        // Debug
         setDebugData(json); 
-        console.log("✅ Données reçues de Snowflake:", json);
+        console.log("✅ Données reçues:", json);
 
-        // Injection des données
-        if (json.data) {
-            // On suppose ici que json.data contient les lignes de V_EVENEMENT_AVOCATMAIL
-            setBackofficeData(json.data); 
+        // Injection des données Backoffice
+        if (json.backoffice) {
+            setBackofficeData(json.backoffice); 
+        }
+
+        // Injection des données Encours (NOUVEAU)
+        if (json.encours) {
+            setEncoursData(json.encours);
         }
 
         setIsLoading(false);
@@ -123,10 +125,9 @@ function MigrationDashboard() {
     fetchData();
   }, [getToken]);
   
-  // --- TRAITEMENT DES DONNÉES (MAPPING SNOWFLAKE) ---
+  // --- TRAITEMENT DES DONNÉES ---
 
   const { detailedData, eventsData, planningCount } = useMemo(() => {
-    // Si pas de données, retour vide
     if (backofficeData.length === 0 && encoursData.length === 0) {
         return { detailedData: [], eventsData: [], planningCount: 0 };
     }
@@ -135,43 +136,33 @@ function MigrationDashboard() {
     const planningEventsList = [];
     const monthlyStats = new Map();
 
-    // 1. Traitement V_EVENEMENT_AVOCATMAIL (Snowflake)
+    // 1. TRAITEMENT BACKOFFICE (V_EVENEMENT_AVOCATMAIL)
     backofficeData.forEach(row => {
-      // Normalisation des clés pour éviter les erreurs de casse
       const cleanRow = {};
       Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
 
-      // --- MAPPING DES COLONNES SNOWFLAKE ---
-      const typeEvent = cleanRow['EVENEMENT'];     // Old: Evènement
-      const dateEvent = cleanRow['DATE'];          // Old: Date
-      const resp = cleanRow['RESPONSABLE'];        // Old: Responsable
-      const duree = cleanRow['DUREE_HRS'];         // Old: Durée
-      const dossier = cleanRow['DOSSIER'] || cleanRow['LIBELLE'] || 'Client Inconnu'; // Old: Dossier/Libellé
-      
-      // Note: "USER" est souvent aliasé en NB_USERS ou autre dans les API pour éviter les conflits
-      // Je checke les deux possibilités
-      const nbUsers = cleanRow['USER'] || cleanRow['NB_USERS'] || cleanRow['users'] || '1'; 
+      const typeEvent = cleanRow['EVENEMENT'];
+      const dateEvent = cleanRow['DATE'];
+      const resp = cleanRow['RESPONSABLE'];
+      const duree = cleanRow['DUREE_HRS'];
+      const dossier = cleanRow['DOSSIER'] || cleanRow['LIBELLE'] || 'Client Inconnu';
+      const nbUsers = cleanRow['USER'] || cleanRow['NB_USERS'] || '1';
 
-      // Filtre sur les types d'événements pertinents
       if (!typeEvent || !['Avocatmail - Analyse', 'Migration messagerie Adwin', 'Tache de backoffice Avocatmail'].includes(typeEvent)) return;
       
       let dateStr = dateEvent; 
       if (!dateStr) return;
       
-      // Gestion format date (Snowflake renvoie souvent YYYY-MM-DD)
       if (dateStr.includes('/')) {
-         // Si format DD/MM/YYYY
          const parts = dateStr.split(' ')[0].split('/');
          if (parts.length === 3) dateStr = `${parts[2]}-${parts[1]}-${parts[0]}`; 
       } else if (dateStr.includes('T')) {
-         // Si format ISO YYYY-MM-DDTHH:mm:ss
           dateStr = dateStr.split('T')[0]; 
       }
       
       const month = dateStr.substring(0, 7);
       const tech = normalizeTechName(resp, techList);
       
-      // Calcul Durée (DUREE_HRS est souvent déjà un nombre decimal dans Snowflake)
       let duration = 0;
       if (typeof duree === 'number') {
           duration = duree;
@@ -184,7 +175,6 @@ function MigrationDashboard() {
           }
       }
 
-      // Règles de calcul KPI
       let besoin = 0;
       let capacite = 0;
       let color = 'gray';
@@ -221,13 +211,75 @@ function MigrationDashboard() {
       });
     });
 
-    // 2. Traitement Encours (A adapter plus tard si tu as une vue pour ça)
-    // Pour l'instant on garde le code générique "au cas où" tu injecterais des données ici
+    // 2. TRAITEMENT ENCOURS (V_TICKETS_SERVICE_TECHNIQUE)
     encoursData.forEach(row => {
-        // ... (Code existant conservé pour compatibilité future) ...
         const cleanRow = {};
         Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
-        // ...
+
+        // --- MAPPING DES COLONNES ENCOURS ---
+        // Interlocuteur (CSV) -> RESPONSABLE (Snowflake) = Le Technicien
+        const techNameRaw = cleanRow['RESPONSABLE'];
+        
+        // Catégorie (CSV) -> CATEGORIE (Snowflake)
+        const categorie = cleanRow['CATEGORIE'];
+        
+        // Dernière action (CSV) -> DERNIERE_ACTION (Snowflake)
+        let lastAction = cleanRow['DERNIERE_ACTION'];
+        
+        // Client (CSV) -> INTERLOCUTEUR (Snowflake) = Le Client
+        const clientName = cleanRow['INTERLOCUTEUR'] || 'Client Inconnu';
+        
+        const tech = normalizeTechName(techNameRaw, techList);
+        
+        // Logique "Planning"
+        if (categorie === 'Prêt pour mise en place') {
+            planningEventsList.push({
+                date: "N/A",
+                tech,
+                client: clientName,
+                type: "Prêt pour Mise en Place",
+                duration: 0,
+                status: "A Planifier",
+                color: "indigo"
+            });
+            return;
+        }
+
+        // Logique "En cours" (basée sur la date de dernière action)
+        if (lastAction) {
+            // Normalisation date
+            if (lastAction.includes('/')) {
+                const parts = lastAction.split(' ')[0].split('/');
+                if (parts.length === 3) lastAction = `${parts[2]}-${parts[1]}-${parts[0]}`;
+            } else if (lastAction.includes('T')) {
+                lastAction = lastAction.split('T')[0];
+            }
+            
+            const lastDate = new Date(lastAction);
+            if (!isNaN(lastDate.getTime())) {
+                const targetDate = new Date(lastDate);
+                targetDate.setDate(targetDate.getDate() + 7); // Projection à J+7
+                const targetDateStr = targetDate.toISOString().split('T')[0];
+                const targetMonth = targetDateStr.substring(0, 7);
+
+                const key = `${targetMonth}_${tech}`;
+                if (!monthlyStats.has(key)) {
+                    monthlyStats.set(key, { month: targetMonth, tech, besoin: 0, besoin_encours: 0, capacite: 0 });
+                }
+                const entry = monthlyStats.get(key);
+                entry.besoin_encours += 1.0; // On compte 1h par défaut pour un dossier en cours
+
+                events.push({
+                    date: targetDateStr,
+                    tech,
+                    client: clientName,
+                    type: "Analyse (En cours)",
+                    duration: 1.0,
+                    status: "En attente (Encours)",
+                    color: "amber"
+                });
+            }
+        }
     });
 
     const detailedDataArray = Array.from(monthlyStats.values()).sort((a, b) => a.month.localeCompare(b.month));
