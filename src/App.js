@@ -6,7 +6,7 @@ import {
 import { 
   Activity, Users, Clock, TrendingUp, AlertTriangle, CheckCircle, 
   Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Loader,
-  ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout, Search, Layers
+  ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout, Search, Layers, Server, FileSearch
 } from 'lucide-react';
 import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
 
@@ -96,6 +96,27 @@ const SortableHeader = ({ label, sortKey, currentSort, onSort, align = 'left' })
   );
 };
 
+// --- NOUVEAU COMPOSANT : PROGRESS BAR PIPE ---
+const PipeProgress = ({ label, count, colorClass, barColor }) => {
+    // Calcul arbitraire du pourcentage (Max 15 dossiers = 100%)
+    const percentage = Math.min((count / 15) * 100, 100);
+    
+    return (
+        <div className="flex flex-col w-full">
+            <div className="flex justify-between items-end mb-1">
+                <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">{label}</span>
+                <span className={`text-sm font-bold ${colorClass}`}>{count}</span>
+            </div>
+            <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                <div 
+                    className={`h-full rounded-full transition-all duration-500 ease-out ${barColor}`} 
+                    style={{ width: `${percentage}%` }} 
+                />
+            </div>
+        </div>
+    );
+};
+
 // --- APPLICATION PRINCIPALE ---
 
 function MigrationDashboard() {
@@ -112,7 +133,7 @@ function MigrationDashboard() {
   // Accordeons (États d'affichage)
   const [isDetailListExpanded, setIsDetailListExpanded] = useState(true);
   const [isTableExpanded, setIsTableExpanded] = useState(false); 
-  const [isTechChartExpanded, setIsTechChartExpanded] = useState(false); // REPLIÉ PAR DÉFAUT
+  const [isTechChartExpanded, setIsTechChartExpanded] = useState(false); 
 
   // Tri
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
@@ -153,9 +174,8 @@ function MigrationDashboard() {
     const monthlyStats = new Map();
     const monthsSet = new Set(); 
 
-    // Compteurs pour les pipes
     let countReadyMiseEnPlace = 0;
-    let countReadyAnalyse = 0; // Nouveau compteur pour le 2ème pipe
+    let countReadyAnalyse = 0; 
 
     const addToStats = (month, tech, besoin, besoin_encours, capacite) => {
         monthsSet.add(month);
@@ -244,7 +264,6 @@ function MigrationDashboard() {
         const clientName = cleanRow['INTERLOCUTEUR'] || 'Client Inconnu';
         const tech = normalizeTechName(techNameRaw, techList);
         
-        // --- LOGIQUE PIPE ---
         if (categorie === 'Prêt pour mise en place') {
             countReadyMiseEnPlace++;
             planningEventsList.push({
@@ -254,15 +273,12 @@ function MigrationDashboard() {
             return;
         }
         
-        // --- LOGIQUE PIPE ANALYSE (Filtre temporaire ou à adapter) ---
-        // Adapte ce test quand tu auras le critère exact pour "Prêt pour analyse"
         if (categorie === 'Prêt pour analyse' || categorie === 'A Planifier (Analyse)') {
             countReadyAnalyse++;
             planningEventsList.push({
                 date: "N/A", tech, client: clientName, type: "Prêt pour Analyse",
                 duration: 0, status: "A Planifier (Analyse)", color: "cyan"
             });
-            // return; // Si on ne veut pas le traiter comme "En cours"
         }
 
         if (lastAction) {
@@ -303,12 +319,12 @@ function MigrationDashboard() {
         detailedData: detailedDataArray,
         eventsData: [...planningEventsList, ...events],
         planningCount: countReadyMiseEnPlace,
-        analysisPipeCount: countReadyAnalyse, // Nouveau compteur
+        analysisPipeCount: countReadyAnalyse,
         availableMonths: sortedMonths
     };
   }, [backofficeData, encoursData, techList]);
 
-  // --- LOGIQUE TRI ---
+  // --- LOGIQUE TRI & AFFICHAGE ---
   const handleSort = (key) => {
     let direction = 'asc';
     if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
@@ -319,7 +335,6 @@ function MigrationDashboard() {
     let events = eventsData;
     if (selectedTech !== 'Tous') events = events.filter(e => e.tech === selectedTech);
     
-    // Filtrage spécial pour le bouton Planning : on montre les deux types de "A Planifier"
     if (showPlanning) events = events.filter(e => e.status.includes("A Planifier"));
     else if (selectedMonth) events = events.filter(e => e.date !== "N/A" && e.date.startsWith(selectedMonth));
     else events = events.filter(e => e.date !== "N/A");
@@ -342,7 +357,6 @@ function MigrationDashboard() {
     return events;
   }, [selectedTech, selectedMonth, showPlanning, eventsData, sortConfig]);
 
-  // --- AGREGATION MENSUELLE (VUE ANNUELLE) ---
   const monthlyAggregatedData = useMemo(() => {
     if (detailedData.length === 0) return [];
     
@@ -377,7 +391,6 @@ function MigrationDashboard() {
     return result;
   }, [detailedData, selectedTech]);
 
-  // --- AGREGATION HEBDOMADAIRE (VUE DETAIL) ---
   const weeklyAggregatedData = useMemo(() => {
       if (!selectedMonth) return [];
       let relevantEvents = eventsData.filter(e => e.date !== "N/A" && e.date.startsWith(selectedMonth));
@@ -402,7 +415,6 @@ function MigrationDashboard() {
 
   const mainChartData = selectedMonth ? weeklyAggregatedData : monthlyAggregatedData;
 
-  // --- AGREGATION PAR TECH ---
   const techAggregatedData = useMemo(() => {
     const aggMap = new Map();
     let eventsToUse = eventsData.filter(e => e.date !== "N/A");
@@ -418,7 +430,6 @@ function MigrationDashboard() {
     return Array.from(aggMap.values());
   }, [eventsData, selectedMonth]);
 
-  // KPI STATS
   const kpiStats = useMemo(() => {
     if (mainChartData.length === 0) return { besoin: 0, capacite: 0, ratio: 0 };
     const totalBesoin = mainChartData.reduce((acc, curr) => acc + (curr.totalBesoinMois || (curr.besoin + curr.besoin_encours)), 0);
@@ -427,7 +438,6 @@ function MigrationDashboard() {
     return { besoin: totalBesoin, capacite: totalCapacite, ratio };
   }, [mainChartData]);
 
-  // Handlers
   const handleChartClick = (data) => {
     if (data && data.activeLabel && !selectedMonth) {
        setSelectedMonth(data.activeLabel);
@@ -487,42 +497,24 @@ function MigrationDashboard() {
 
       {/* KPI GRID */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-        {/* DOUBLE PIPE (PLANNING) */}
+        {/* NOUVEAU DOUBLE PIPE (BARRES) */}
         <div 
             onClick={() => { setShowPlanning(!showPlanning); setSelectedMonth(null); }}
-            className={`px-4 py-2 rounded-lg shadow-sm border flex items-center justify-between cursor-pointer transition-all duration-200 
+            className={`px-4 py-3 rounded-lg shadow-sm border flex flex-col justify-center cursor-pointer transition-all duration-200 gap-3
             ${showPlanning ? 'bg-indigo-50 border-indigo-200 ring-2 ring-indigo-100' : 'bg-white border-slate-100 hover:bg-slate-50'}`}
         >
-          <div className="flex-1">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Pipes Planning</p>
-            <div className="flex gap-4">
-                <div className="flex flex-col">
-                    <span className="text-lg font-bold text-indigo-600 leading-none">{planningCount}</span>
-                    <span className="text-[9px] text-slate-400">Prêt Migr.</span>
-                </div>
-                <div className="flex flex-col border-l pl-3 border-slate-100">
-                    <span className="text-lg font-bold text-cyan-600 leading-none">{analysisPipeCount}</span>
-                    <span className="text-[9px] text-slate-400">Prêt Anal.</span>
-                </div>
-            </div>
-          </div>
-           {/* Mini Jauges */}
-           <div className="flex gap-1">
-                <div className="w-8 h-8 relative">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <RadialBarChart innerRadius="60%" outerRadius="100%" barSize={3} data={[{value: planningCount||1, fill: '#4f46e5'}]} startAngle={90} endAngle={-270}>
-                            <RadialBar background dataKey="value" cornerRadius={10} />
-                        </RadialBarChart>
-                    </ResponsiveContainer>
-                </div>
-                <div className="w-8 h-8 relative">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <RadialBarChart innerRadius="60%" outerRadius="100%" barSize={3} data={[{value: analysisPipeCount||1, fill: '#06b6d4'}]} startAngle={90} endAngle={-270}>
-                            <RadialBar background dataKey="value" cornerRadius={10} />
-                        </RadialBarChart>
-                    </ResponsiveContainer>
-                </div>
-           </div>
+            <PipeProgress 
+                label="Prêt pour Mise en Place" 
+                count={planningCount} 
+                colorClass="text-indigo-600" 
+                barColor="bg-indigo-500" 
+            />
+            <PipeProgress 
+                label="Prêt pour Analyse" 
+                count={analysisPipeCount} 
+                colorClass="text-cyan-600" 
+                barColor="bg-cyan-500" 
+            />
         </div>
 
         <KPICard title="Besoin Total (h)" value={kpiStats.besoin.toFixed(0)} subtext={selectedMonth ? "Sur le mois" : "Annuel"} icon={Users} colorClass="text-slate-600" active={!!selectedMonth}/>
@@ -530,12 +522,12 @@ function MigrationDashboard() {
         <KPICard title="Taux Couverture" value={`${kpiStats.ratio.toFixed(0)}%`} subtext="Capa. / Besoin" icon={TrendingUp} colorClass={kpiStats.ratio >= 100 ? "text-emerald-600" : "text-red-600"} active={!!selectedMonth}/>
       </div>
 
-      {/* GRAPHIQUE PRINCIPAL (INTERACTIF) */}
+      {/* GRAPHIQUE PRINCIPAL */}
       <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 mb-4">
         <div className="flex flex-col sm:flex-row items-center justify-between mb-4 gap-4">
             <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">
-                <button onClick={() => toggleViewMode('months')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${!selectedMonth ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Mois</button>
-                <button onClick={() => toggleViewMode('weeks')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${selectedMonth ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Semaines</button>
+                <button onClick={() => toggleViewMode('months')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${!selectedMonth ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Vue Annuelle (Mois)</button>
+                <button onClick={() => toggleViewMode('weeks')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${selectedMonth ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Vue Détaillée (Semaines)</button>
             </div>
             {selectedMonth && (
                 <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-200">
@@ -569,13 +561,9 @@ function MigrationDashboard() {
 
       {/* --- LISTE DÉTAILLÉE --- */}
       <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden mb-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
-        <button 
-          onClick={() => setIsDetailListExpanded(!isDetailListExpanded)}
-          className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors"
-        >
+        <button onClick={() => setIsDetailListExpanded(!isDetailListExpanded)} className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors">
           <div className="flex items-center gap-2">
-            <FileText className="w-4 h-4 text-slate-400" />
-            <h2 className="text-sm font-bold text-slate-800">Détail des Opérations {selectedTech !== 'Tous' ? `: ${selectedTech}` : "(Tous)"}</h2>
+            <FileText className="w-4 h-4 text-slate-400" /><h2 className="text-sm font-bold text-slate-800">Détail des Opérations {selectedTech !== 'Tous' ? `: ${selectedTech}` : "(Tous)"}</h2>
             <span className="ml-2 text-xs font-normal text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">{filteredAndSortedEvents.length} entrées</span>
           </div>
           {isDetailListExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
@@ -601,9 +589,7 @@ function MigrationDashboard() {
                     <td className="px-2 py-1 font-medium text-slate-700 whitespace-nowrap truncate max-w-[200px]" title={event.client}>{event.client}</td>
                     <td className="px-2 py-1 text-slate-500 whitespace-nowrap">{event.type}</td>
                     <td className="px-2 py-1 text-right font-medium whitespace-nowrap">{event.duration > 0 ? event.duration.toFixed(2) : '-'}</td>
-                    <td className="px-2 py-1 text-center whitespace-nowrap">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${event.color === 'cyan' ? 'bg-cyan-100 text-cyan-700' : event.color === 'purple' ? 'bg-purple-100 text-purple-700' : event.color === 'indigo' ? 'bg-indigo-100 text-indigo-700' : event.color === 'amber' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>{event.status}</span>
-                    </td>
+                    <td className="px-2 py-1 text-center whitespace-nowrap"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${event.color === 'cyan' ? 'bg-cyan-100 text-cyan-700' : event.color === 'purple' ? 'bg-purple-100 text-purple-700' : event.color === 'indigo' ? 'bg-indigo-100 text-indigo-700' : event.color === 'amber' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>{event.status}</span></td>
                   </tr>
                 ))}
                 {filteredAndSortedEvents.length === 0 && (<tr><td colSpan="6" className="px-4 py-8 text-center text-slate-400 italic">Aucun événement trouvé.</td></tr>)}
@@ -613,19 +599,12 @@ function MigrationDashboard() {
         )}
       </div>
 
-      {/* --- BLOC BAS : CHARGE TECH (50%) & TABLEAU MENSUEL (REPLIÉS) --- */}
+      {/* --- BLOC BAS : CHARGE TECH & TABLEAU MENSUEL (REPLIÉS) --- */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
-        
-        {/* 1. CHARGE PAR TECH (Replié par défaut, 50% width) */}
+        {/* CHARGE PAR TECH */}
         <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden h-fit">
-            <button 
-                onClick={() => setIsTechChartExpanded(!isTechChartExpanded)}
-                className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors"
-            >
-                <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                    <Users className="w-4 h-4 text-slate-400" />
-                    Charge par Tech {selectedMonth ? `(${formatMonth(selectedMonth)})` : "(Globale)"}
-                </h2>
+            <button onClick={() => setIsTechChartExpanded(!isTechChartExpanded)} className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors">
+                <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Users className="w-4 h-4 text-slate-400" />Charge par Tech {selectedMonth ? `(${formatMonth(selectedMonth)})` : "(Globale)"}</h2>
                 {isTechChartExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
             </button>
             {isTechChartExpanded && (
@@ -644,34 +623,20 @@ function MigrationDashboard() {
                 </div>
             )}
         </div>
-
-        {/* 2. ESPACE VIDE OU FUTUR WIDGET (Le tableau mensuel descend en dessous sur demande "Pas le au dessus") */}
         <div className="hidden lg:block"></div> 
       </div>
 
-      {/* --- TABLEAU MENSUEL (REPLIÉ PAR DÉFAUT, TOUTE LARGEUR) --- */}
+      {/* TABLEAU MENSUEL */}
       <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden mb-8">
-        <button 
-          onClick={() => setIsTableExpanded(!isTableExpanded)}
-          className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors"
-        >
-          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-            <TableIcon className="w-4 h-4 text-slate-400" />
-            Résultats Mensuels Détaillés (Globaux)
-          </h2>
+        <button onClick={() => setIsTableExpanded(!isTableExpanded)} className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors">
+          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2"><TableIcon className="w-4 h-4 text-slate-400" />Résultats Mensuels Détaillés (Globaux)</h2>
           {isTableExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
         </button>
         {isTableExpanded && (
           <div className="overflow-x-auto animate-in fade-in slide-in-from-top-2 duration-200">
             <table className="w-full text-sm text-left text-slate-600">
               <thead className="text-xs text-slate-500 uppercase bg-slate-50/50 border-b border-slate-100">
-                <tr>
-                  <th className="px-4 py-3 font-semibold">Mois</th>
-                  <th className="px-4 py-3 font-semibold text-right">Besoin Total</th>
-                  <th className="px-4 py-3 font-semibold text-right text-amber-500">Dont En Cours</th>
-                  <th className="px-4 py-3 font-semibold text-right text-purple-600">Capacité</th> 
-                  <th className="px-4 py-3 font-semibold text-right">Ecart Mensuel</th>
-                </tr>
+                <tr><th className="px-4 py-3 font-semibold">Mois</th><th className="px-4 py-3 font-semibold text-right">Besoin Total</th><th className="px-4 py-3 font-semibold text-right text-amber-500">Dont En Cours</th><th className="px-4 py-3 font-semibold text-right text-purple-600">Capacité</th> <th className="px-4 py-3 font-semibold text-right">Ecart Mensuel</th></tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {monthlyAggregatedData.map((row) => (
@@ -680,11 +645,7 @@ function MigrationDashboard() {
                     <td className="px-4 py-2 text-right">{row.totalBesoinMois.toFixed(1)} h</td>
                     <td className="px-4 py-2 text-right text-amber-500">{row.besoin_encours > 0 ? `${row.besoin_encours.toFixed(1)} h` : '-'}</td>
                     <td className="px-4 py-2 text-right text-purple-600 font-medium">{row.capacite.toFixed(1)} h</td>
-                    <td className="px-4 py-2 text-right">
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${row.soldeMensuel >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                        {row.soldeMensuel > 0 ? '+' : ''}{row.soldeMensuel.toFixed(1)} h
-                      </span>
-                    </td>
+                    <td className="px-4 py-2 text-right"><span className={`px-2 py-0.5 rounded text-xs font-medium ${row.soldeMensuel >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{row.soldeMensuel > 0 ? '+' : ''}{row.soldeMensuel.toFixed(1)} h</span></td>
                   </tr>
                 ))}
               </tbody>
@@ -699,21 +660,12 @@ function MigrationDashboard() {
 
 export default function App() {
   if (!clerkPubKey) {
-    return (
-      <div className="flex items-center justify-center h-screen text-red-600 font-bold">
-        Erreur : Clé Clerk (REACT_APP_CLERK_PUBLISHABLE_KEY) manquante dans Vercel.
-      </div>
-    );
+    return <div className="flex items-center justify-center h-screen text-red-600 font-bold">Erreur : Clé Clerk manquante.</div>;
   }
-
   return (
     <ClerkProvider publishableKey={clerkPubKey}>
-      <SignedIn>
-        <MigrationDashboard />
-      </SignedIn>
-      <SignedOut>
-        <RedirectToSignIn />
-      </SignedOut>
+      <SignedIn><MigrationDashboard /></SignedIn>
+      <SignedOut><RedirectToSignIn /></SignedOut>
     </ClerkProvider>
   );
 }
