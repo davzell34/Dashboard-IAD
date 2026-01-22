@@ -6,7 +6,7 @@ import {
 import { 
   Activity, Users, Clock, TrendingUp, AlertTriangle, CheckCircle, 
   Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Loader,
-  ArrowUpDown, ArrowUp, ArrowDown // Nouveaux imports pour le tri
+  ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight
 } from 'lucide-react';
 import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
 
@@ -36,6 +36,15 @@ const formatMonth = (dateStr) => {
   return date.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
 };
 
+// Fonction pour obtenir le numéro de semaine et le label
+const getWeekLabel = (dateStr) => {
+    const date = new Date(dateStr);
+    const firstDayOfYear = new Date(date.getFullYear(), 0, 1);
+    const pastDaysOfYear = (date - firstDayOfYear) / 86400000;
+    const weekNum = Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
+    return `S${weekNum}`;
+};
+
 // --- COMPOSANTS UI ---
 
 const KPICard = ({ title, value, subtext, icon: Icon, colorClass, active, onClick }) => (
@@ -56,10 +65,8 @@ const KPICard = ({ title, value, subtext, icon: Icon, colorClass, active, onClic
   </div>
 );
 
-// Composant pour l'entête de colonne triable
 const SortableHeader = ({ label, sortKey, currentSort, onSort, align = 'left' }) => {
   const isSorted = currentSort.key === sortKey;
-  
   return (
     <th 
       className={`px-2 py-2 font-semibold whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors group select-none text-${align}`}
@@ -82,73 +89,57 @@ const SortableHeader = ({ label, sortKey, currentSort, onSort, align = 'left' })
 // --- APPLICATION PRINCIPALE ---
 
 function MigrationDashboard() {
-  // États des données
   const [backofficeData, setBackofficeData] = useState([]);
   const [encoursData, setEncoursData] = useState([]);
   const [techList, setTechList] = useState(TECH_LIST_DEFAULT);
   
-  // États de chargement API & DEBUG
   const [isLoading, setIsLoading] = useState(true);
-  const [debugData, setDebugData] = useState(null); 
-  const [apiError, setApiError] = useState(null);  
-
-  // États de l'interface
+  
   const [selectedTech, setSelectedTech] = useState('Tous');
   const [selectedMonth, setSelectedMonth] = useState(null);
   const [showPlanning, setShowPlanning] = useState(false); 
 
-  // États d'ouverture des blocs (Accordéons)
-  const [isDetailListExpanded, setIsDetailListExpanded] = useState(true); // Ouvert par défaut car prioritaire
+  // Accordeons
+  const [isDetailListExpanded, setIsDetailListExpanded] = useState(true);
   const [isTableExpanded, setIsTableExpanded] = useState(false); 
-  const [isTechChartExpanded, setIsTechChartExpanded] = useState(false); // Réduit par défaut
-  const [isCurvesExpanded, setIsCurvesExpanded] = useState(false); // Réduit par défaut
+  const [isTechChartExpanded, setIsTechChartExpanded] = useState(true); // Ouvert par défaut en bas
 
-  // État du Tri
+  // Tri
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
 
-  // --- SÉCURITÉ & CONNEXION SNOWFLAKE ---
   const { getToken } = useAuth(); 
 
   useEffect(() => {
     const fetchData = async () => {
       console.log("🔒 Connexion Snowflake en cours...");
       setIsLoading(true);
-      setApiError(null);
 
       try {
         const token = await getToken();
-        
         const response = await fetch('/api/getData', {
           headers: { Authorization: `Bearer ${token}` }
         });
 
         if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Erreur API (${response.status}): ${errorText}`);
+            throw new Error(`Erreur API`);
         }
 
         const json = await response.json();
-        
-        setDebugData(json); 
-        console.log("✅ Données reçues:", json);
+        console.log("✅ Données reçues");
 
         if (json.backoffice) setBackofficeData(json.backoffice); 
         if (json.encours) setEncoursData(json.encours);
 
         setIsLoading(false);
-
       } catch (err) {
         console.error("❌ Erreur API :", err);
-        setApiError(err.message);
-        setDebugData({ error: err.message });
         setIsLoading(false);
       }
     };
-
     fetchData();
   }, [getToken]);
   
-  // --- TRAITEMENT DES DONNÉES ---
+  // --- TRAITEMENT CORE ---
 
   const { detailedData, eventsData, planningCount } = useMemo(() => {
     if (backofficeData.length === 0 && encoursData.length === 0) {
@@ -159,7 +150,19 @@ function MigrationDashboard() {
     const planningEventsList = [];
     const monthlyStats = new Map();
 
-    // 1. TRAITEMENT BACKOFFICE
+    // Helper pour ajouter aux stats mensuelles (servira pour la vue globale)
+    const addToStats = (month, tech, besoin, besoin_encours, capacite) => {
+        const key = `${month}_${tech}`;
+        if (!monthlyStats.has(key)) {
+            monthlyStats.set(key, { month, tech, besoin: 0, besoin_encours: 0, capacite: 0 });
+        }
+        const entry = monthlyStats.get(key);
+        entry.besoin += besoin;
+        entry.besoin_encours += besoin_encours;
+        entry.capacite += capacite;
+    };
+
+    // 1. BACKOFFICE
     backofficeData.forEach(row => {
       const cleanRow = {};
       Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
@@ -187,9 +190,8 @@ function MigrationDashboard() {
       const tech = normalizeTechName(resp, techList);
       
       let duration = 0;
-      if (typeof duree === 'number') {
-          duration = duree;
-      } else if (duree && typeof duree === 'string') {
+      if (typeof duree === 'number') duration = duree;
+      else if (duree && typeof duree === 'string') {
           if (duree.includes(':')) {
             const [h, m] = duree.split(':').map(Number);
             duration = (h || 0) + (m || 0)/60;
@@ -215,13 +217,7 @@ function MigrationDashboard() {
         status = 'Besoin (Analyse/Migr)';
       }
 
-      const key = `${month}_${tech}`;
-      if (!monthlyStats.has(key)) {
-        monthlyStats.set(key, { month, tech, besoin: 0, besoin_encours: 0, capacite: 0 });
-      }
-      const entry = monthlyStats.get(key);
-      entry.besoin += besoin;
-      entry.capacite += capacite;
+      addToStats(month, tech, besoin, 0, capacite);
 
       events.push({
         date: dateStr,
@@ -230,20 +226,22 @@ function MigrationDashboard() {
         type: typeEvent,
         duration: Math.max(besoin, capacite),
         status,
-        color
+        color,
+        // Pour l'agrégation hebdo, on garde les valeurs brutes
+        raw_besoin: besoin,
+        raw_capacite: capacite,
+        raw_besoin_encours: 0
       });
     });
 
-    // 2. TRAITEMENT ENCOURS
+    // 2. ENCOURS
     encoursData.forEach(row => {
         const cleanRow = {};
         Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
-
         const techNameRaw = cleanRow['RESPONSABLE'];
         const categorie = cleanRow['CATEGORIE'];
         let lastAction = cleanRow['DERNIERE_ACTION'];
         const clientName = cleanRow['INTERLOCUTEUR'] || 'Client Inconnu';
-        
         const tech = normalizeTechName(techNameRaw, techList);
         
         if (categorie === 'Prêt pour mise en place') {
@@ -263,9 +261,7 @@ function MigrationDashboard() {
             if (lastAction.includes('/')) {
                 const parts = lastAction.split(' ')[0].split('/');
                 if (parts.length === 3) lastAction = `${parts[2]}-${parts[1]}-${parts[0]}`;
-            } else if (lastAction.includes('T')) {
-                lastAction = lastAction.split('T')[0];
-            }
+            } else if (lastAction.includes('T')) lastAction = lastAction.split('T')[0];
             
             const lastDate = new Date(lastAction);
             if (!isNaN(lastDate.getTime())) {
@@ -274,12 +270,7 @@ function MigrationDashboard() {
                 const targetDateStr = targetDate.toISOString().split('T')[0];
                 const targetMonth = targetDateStr.substring(0, 7);
 
-                const key = `${targetMonth}_${tech}`;
-                if (!monthlyStats.has(key)) {
-                    monthlyStats.set(key, { month: targetMonth, tech, besoin: 0, besoin_encours: 0, capacite: 0 });
-                }
-                const entry = monthlyStats.get(key);
-                entry.besoin_encours += 1.0; 
+                addToStats(targetMonth, tech, 0, 1.0, 0);
 
                 events.push({
                     date: targetDateStr,
@@ -288,14 +279,17 @@ function MigrationDashboard() {
                     type: "Analyse (En cours)",
                     duration: 1.0,
                     status: "En attente (Encours)",
-                    color: "amber"
+                    color: "amber",
+                    raw_besoin: 0,
+                    raw_capacite: 0,
+                    raw_besoin_encours: 1.0
                 });
             }
         }
     });
 
     const detailedDataArray = Array.from(monthlyStats.values()).sort((a, b) => a.month.localeCompare(b.month));
-    const allEvents = [...planningEventsList, ...events]; // Le tri se fait plus bas
+    const allEvents = [...planningEventsList, ...events];
 
     return {
         detailedData: detailedDataArray,
@@ -304,41 +298,31 @@ function MigrationDashboard() {
     };
   }, [backofficeData, encoursData, techList]);
 
-  // --- LOGIQUE DE TRI ---
+  // --- LOGIQUE D'AFFICHAGE & TRI ---
 
   const handleSort = (key) => {
     let direction = 'asc';
-    if (sortConfig.key === key && sortConfig.direction === 'asc') {
-      direction = 'desc';
-    }
+    if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
     setSortConfig({ key, direction });
   };
 
   const filteredAndSortedEvents = useMemo(() => {
     let events = eventsData;
-    
-    // Filtrage
     if (selectedTech !== 'Tous') events = events.filter(e => e.tech === selectedTech);
     if (showPlanning) events = events.filter(e => e.status === "A Planifier");
     else if (selectedMonth) events = events.filter(e => e.date !== "N/A" && e.date.startsWith(selectedMonth));
     else events = events.filter(e => e.date !== "N/A");
 
-    // Tri
     if (sortConfig.key) {
       events.sort((a, b) => {
         let valA = a[sortConfig.key];
         let valB = b[sortConfig.key];
-        
-        // Gestion spécifique des dates N/A
         if (sortConfig.key === 'date') {
             if (valA === 'N/A') valA = '0000-00-00';
             if (valB === 'N/A') valB = '0000-00-00';
         }
-
-        // Gestion des chaînes de caractères (insensible à la casse)
         if (typeof valA === 'string') valA = valA.toLowerCase();
         if (typeof valB === 'string') valB = valB.toLowerCase();
-
         if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
         if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
         return 0;
@@ -347,130 +331,127 @@ function MigrationDashboard() {
     return events;
   }, [selectedTech, selectedMonth, showPlanning, eventsData, sortConfig]);
 
-  // --- LOGIQUE D'AFFICHAGE ---
-
-  const filteredRawData = useMemo(() => {
-    if (selectedTech === 'Tous') return detailedData;
-    return detailedData.filter(d => d.tech === selectedTech);
-  }, [selectedTech, detailedData]);
-
+  // --- AGREGATION MENSUELLE ---
   const monthlyAggregatedData = useMemo(() => {
     if (detailedData.length === 0) return [];
     
-    const allMonths = detailedData.map(d => d.month).sort();
-    const startMonthStr = allMonths[0] || '2025-01';
-    const endMonthStr = allMonths[allMonths.length - 1] || '2026-12';
-    
+    // Filtrer d'abord par tech si nécessaire
+    const dataToUse = selectedTech === 'Tous' ? detailedData : detailedData.filter(d => d.tech === selectedTech);
+
     const aggMap = new Map();
-    filteredRawData.forEach(item => {
-      if (!aggMap.has(item.month)) aggMap.set(item.month, { month: item.month, besoin: 0, besoin_encours: 0, capacite: 0 });
+    dataToUse.forEach(item => {
+      if (!aggMap.has(item.month)) aggMap.set(item.month, { month: item.month, label: formatMonth(item.month), besoin: 0, besoin_encours: 0, capacite: 0 });
       const entry = aggMap.get(item.month);
       entry.besoin += item.besoin;
       entry.besoin_encours += item.besoin_encours;
       entry.capacite += item.capacite;
     });
 
-    let current = new Date(startMonthStr + '-01');
-    const end = new Date(endMonthStr + '-01');
-    if (current > end) return [];
+    const allMonths = Array.from(aggMap.keys()).sort();
+    if(allMonths.length === 0) return [];
+
+    let current = new Date(allMonths[0] + '-01');
+    const end = new Date(allMonths[allMonths.length - 1] + '-01');
     
     const result = [];
-    let cumulBesoin = 0;
-    let cumulCapacite = 0;
-
     while (current <= end) {
         const mStr = current.toISOString().substring(0, 7);
-        const data = aggMap.get(mStr) || { month: mStr, besoin: 0, besoin_encours: 0, capacite: 0 };
-        
+        const data = aggMap.get(mStr) || { month: mStr, label: formatMonth(mStr), besoin: 0, besoin_encours: 0, capacite: 0 };
         const totalBesoinMois = data.besoin + data.besoin_encours;
-        cumulBesoin += totalBesoinMois;
-        cumulCapacite += data.capacite;
-
         result.push({
             ...data,
-            formattedMonth: formatMonth(mStr),
             totalBesoinMois,
-            cumulBesoin,
-            cumulCapacite,
-            soldeMensuel: data.capacite - totalBesoinMois,
-            soldeCumule: cumulCapacite - cumulBesoin
+            soldeMensuel: data.capacite - totalBesoinMois
         });
         current.setMonth(current.getMonth() + 1);
     }
     return result;
-  }, [filteredRawData, detailedData]);
+  }, [detailedData, selectedTech]);
 
+  // --- NOUVEAU : AGREGATION HEBDOMADAIRE (DYNAMIQUE) ---
+  const weeklyAggregatedData = useMemo(() => {
+      if (!selectedMonth) return [];
+
+      // On repart des événements bruts pour pouvoir les grouper par semaine
+      // On filtre par mois ET par Tech
+      let relevantEvents = eventsData.filter(e => e.date !== "N/A" && e.date.startsWith(selectedMonth));
+      if (selectedTech !== 'Tous') {
+          relevantEvents = relevantEvents.filter(e => e.tech === selectedTech);
+      }
+
+      const weekMap = new Map();
+
+      relevantEvents.forEach(evt => {
+          const weekLabel = getWeekLabel(evt.date);
+          if (!weekMap.has(weekLabel)) {
+              weekMap.set(weekLabel, { month: weekLabel, label: weekLabel, besoin: 0, besoin_encours: 0, capacite: 0 });
+          }
+          const entry = weekMap.get(weekLabel);
+          // On utilise les propriétés brutes qu'on a ajoutées dans le traitement initial
+          entry.besoin += (evt.raw_besoin || 0);
+          entry.besoin_encours += (evt.raw_besoin_encours || 0);
+          entry.capacite += (evt.raw_capacite || 0);
+      });
+
+      // Tri des semaines (S1, S2, S10...)
+      return Array.from(weekMap.values()).sort((a, b) => {
+          const numA = parseInt(a.label.replace('S', ''));
+          const numB = parseInt(b.label.replace('S', ''));
+          return numA - numB;
+      });
+
+  }, [eventsData, selectedMonth, selectedTech]);
+
+  // --- DONNEES DU GRAPHIQUE PRINCIPAL (SWITCH MOIS/SEMAINES) ---
+  const mainChartData = selectedMonth ? weeklyAggregatedData : monthlyAggregatedData;
+
+  // --- AGREGATION PAR TECH (GLOBAL OU FILTRÉ PAR MOIS) ---
   const techAggregatedData = useMemo(() => {
     const aggMap = new Map();
-    const dataToUse = selectedMonth 
-        ? filteredRawData.filter(d => d.month === selectedMonth) 
-        : filteredRawData;
+    // On utilise les événements filtrés (qui respectent déjà le mois sélectionné s'il y en a un)
+    // Mais on ignore le filtre "selectedTech" car ce graphique compare les techs entre eux
+    let eventsToUse = eventsData.filter(e => e.date !== "N/A");
+    if(selectedMonth) eventsToUse = eventsToUse.filter(e => e.date.startsWith(selectedMonth));
 
-    dataToUse.forEach(item => {
+    eventsToUse.forEach(item => {
       if (!aggMap.has(item.tech)) aggMap.set(item.tech, { name: item.tech, besoin: 0, besoin_encours: 0, capacite: 0 });
       const entry = aggMap.get(item.tech);
-      entry.besoin += item.besoin;
-      entry.besoin_encours += item.besoin_encours;
-      entry.capacite += item.capacite;
+      entry.besoin += (item.raw_besoin || 0);
+      entry.besoin_encours += (item.raw_besoin_encours || 0);
+      entry.capacite += (item.raw_capacite || 0);
     });
     return Array.from(aggMap.values());
-  }, [filteredRawData, selectedMonth]);
+  }, [eventsData, selectedMonth]);
 
+  // KPI STATS
   const kpiStats = useMemo(() => {
-    if (!monthlyAggregatedData.length) return { besoin: 0, capacite: 0, delta: 0, ratio: 0 };
+    if (mainChartData.length === 0) return { besoin: 0, capacite: 0, ratio: 0 };
     
-    if (selectedMonth) {
-      const monthData = monthlyAggregatedData.find(d => d.month === selectedMonth);
-      if (!monthData) return { besoin: 0, capacite: 0, delta: 0, ratio: 0 };
-      const totalBesoin = monthData.totalBesoinMois;
-      const ratio = totalBesoin > 0 ? (monthData.capacite / totalBesoin) * 100 : 0;
-      return {
-        besoin: totalBesoin,
-        capacite: monthData.capacite,
-        delta: monthData.soldeMensuel,
-        ratio: ratio
-      };
-    } else {
-      const totalBesoin = monthlyAggregatedData.reduce((acc, curr) => acc + curr.totalBesoinMois, 0);
-      const totalCapacite = monthlyAggregatedData.reduce((acc, curr) => acc + curr.capacite, 0);
-      const ratio = totalBesoin > 0 ? (totalCapacite / totalBesoin) * 100 : 0;
-      const lastMonth = monthlyAggregatedData[monthlyAggregatedData.length - 1];
-      return {
-        besoin: totalBesoin,
-        capacite: totalCapacite,
-        delta: lastMonth ? lastMonth.soldeCumule : 0,
-        ratio: ratio
-      };
-    }
-  }, [monthlyAggregatedData, selectedMonth]);
+    // Somme sur la vue actuelle (soit tous les mois, soit toutes les semaines du mois)
+    const totalBesoin = mainChartData.reduce((acc, curr) => acc + (curr.totalBesoinMois || (curr.besoin + curr.besoin_encours)), 0);
+    const totalCapacite = mainChartData.reduce((acc, curr) => acc + curr.capacite, 0);
+    const ratio = totalBesoin > 0 ? (totalCapacite / totalBesoin) * 100 : 0;
 
+    return { besoin: totalBesoin, capacite: totalCapacite, ratio };
+  }, [mainChartData]);
+
+  // Handlers
   const handleChartClick = (data) => {
     if (data && data.activeLabel) {
-       setSelectedMonth(prev => prev === data.activeLabel ? null : data.activeLabel);
-       setShowPlanning(false); 
+       // Si on est en vue annuelle (label contient une date ou un mois normal, pas "Sxx")
+       // On check si c'est un format YYYY-MM
+       if (!selectedMonth) {
+           // data.activeLabel est "2025-01" par exemple (via dataKey="month")
+           // Le composant XAxis a dataKey="month", donc on reçoit "2025-01"
+           setSelectedMonth(data.activeLabel);
+           setShowPlanning(false); 
+       }
     }
   };
 
-  const handlePlanningClick = () => {
-    setShowPlanning(!showPlanning);
-    setSelectedMonth(null);
-  };
-
-  // --- RENDER : TABLEAU DE BORD ---
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500">
       
-      {debugData && (
-        <div className="bg-gray-900 text-green-400 p-4 mb-6 rounded-lg font-mono text-xs overflow-auto max-h-60 border-2 border-green-500 shadow-xl relative group">
-            <button onClick={() => setDebugData(null)} className="absolute top-2 right-2 text-gray-400 hover:text-white bg-gray-800 p-1 rounded"><X className="w-4 h-4" /></button>
-            <h3 className="font-bold text-white mb-2 text-sm border-b border-gray-700 pb-1 flex items-center gap-2">
-                <Activity className="w-4 h-4 text-green-500" />
-                RÉPONSE SNOWFLAKE API {apiError && <span className="text-red-400 ml-2">(ERREUR DÉTECTÉE)</span>}
-            </h3>
-            <pre className="whitespace-pre-wrap">{JSON.stringify(debugData, null, 2)}</pre>
-        </div>
-      )}
-
       {/* HEADER */}
       <header className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
         <div className="flex items-center gap-3">
@@ -479,9 +460,12 @@ function MigrationDashboard() {
           </div>
           <div>
             <h1 className="text-lg font-bold text-slate-800 leading-tight">Pilotage Migrations</h1>
-            <p className="text-xs text-slate-500 flex items-center gap-2">{selectedTech === 'Tous' ? "Vue Équipe" : `Focus: ${selectedTech}`}</p>
+            <p className="text-xs text-slate-500 flex items-center gap-2">
+               {selectedTech === 'Tous' ? "Vue Équipe" : `Focus: ${selectedTech}`}
+            </p>
           </div>
         </div>
+        
         <div className="flex gap-2 items-center">
             <UserButton />
             <div className="relative">
@@ -502,7 +486,8 @@ function MigrationDashboard() {
                 onClick={() => { setSelectedMonth(null); setShowPlanning(false); }}
                 className="flex items-center gap-1 bg-red-50 text-red-600 px-3 py-1.5 rounded-md text-xs font-medium hover:bg-red-100 transition-colors border border-red-100"
               >
-                <X className="w-3 h-3" /> Effacer ({showPlanning ? "Planning" : formatMonth(selectedMonth)})
+                <X className="w-3 h-3" />
+                Retour Vue Globale
               </button>
             )}
         </div>
@@ -510,8 +495,9 @@ function MigrationDashboard() {
 
       {/* KPI GRID */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        {/* Jauge Pipe Planning */}
         <div 
-            onClick={handlePlanningClick}
+            onClick={() => { setShowPlanning(!showPlanning); setSelectedMonth(null); }}
             className={`px-4 py-3 rounded-lg shadow-sm border flex items-center justify-between cursor-pointer transition-all duration-200 
             ${showPlanning ? 'bg-indigo-50 border-indigo-200 ring-2 ring-indigo-100' : 'bg-white border-slate-100 hover:bg-slate-50'}`}
         >
@@ -533,51 +519,97 @@ function MigrationDashboard() {
              </div>
            </div>
         </div>
-        <KPICard title="Besoin Total (h)" value={kpiStats.besoin.toFixed(0)} subtext="Estimé + En cours" icon={Users} colorClass="text-slate-600" active={!!selectedMonth}/>
-        <KPICard title="Capacité (h)" value={kpiStats.capacite.toFixed(0)} subtext="Planifiée" icon={Clock} colorClass="text-purple-600" active={!!selectedMonth}/>
-        <KPICard title="Taux Couverture" value={`${kpiStats.ratio.toFixed(0)}%`} subtext="Capa. / Besoin" icon={TrendingUp} colorClass={kpiStats.delta >= 0 ? "text-emerald-600" : "text-red-600"} active={!!selectedMonth}/>
+
+        <KPICard 
+          title="Besoin Total (h)" 
+          value={kpiStats.besoin.toFixed(0)} 
+          subtext={selectedMonth ? "Sur le mois" : "Annuel"}
+          icon={Users} 
+          colorClass="text-slate-600"
+          active={!!selectedMonth}
+        />
+        <KPICard 
+          title="Capacité (h)" 
+          value={kpiStats.capacite.toFixed(0)} 
+          subtext="Planifiée"
+          icon={Clock} 
+          colorClass="text-purple-600" 
+          active={!!selectedMonth}
+        />
+         <KPICard 
+          title="Taux Couverture" 
+          value={`${kpiStats.ratio.toFixed(0)}%`} 
+          subtext="Capa. / Besoin"
+          icon={TrendingUp} 
+          colorClass={kpiStats.ratio >= 100 ? "text-emerald-600" : "text-red-600"}
+          active={!!selectedMonth}
+        />
       </div>
 
-      {/* GRAPHIQUE PERFORMANCE (FIXE) */}
+      {/* GRAPHIQUE PRINCIPAL (INTERACTIF) */}
       <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 mb-4">
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-            <BarChart2 className="w-4 h-4 text-slate-400" />
-            Performance {selectedMonth ? `(Focus ${formatMonth(selectedMonth)})` : "(Globale)"}
-          </h2>
+          <div className="flex items-center gap-3">
+             <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                <BarChart2 className="w-4 h-4 text-slate-400" />
+                Performance {selectedMonth ? `Hebdomadaire : ${formatMonth(selectedMonth)}` : "Mensuelle (Globale)"}
+             </h2>
+             {selectedMonth && (
+                 <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                     <CornerDownRight size={10} /> Vue détaillée activée
+                 </span>
+             )}
+          </div>
           <div className="flex gap-3 text-[10px] font-medium uppercase tracking-wider text-slate-500">
             <div className="flex items-center gap-1"><span className="w-2 h-2 bg-cyan-500 rounded-full"></span> Besoin (Nouv.)</div>
             <div className="flex items-center gap-1"><span className="w-2 h-2 bg-amber-500 rounded-full"></span> En Cours</div>
             <div className="flex items-center gap-1"><span className="w-2 h-2 bg-purple-500 rounded-full"></span> Capacité</div>
-            <div className="flex items-center gap-1"><span className="w-3 h-0.5 bg-slate-600"></span> Stock Temps</div>
           </div>
         </div>
         
         <div className="h-64 w-full cursor-pointer">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={monthlyAggregatedData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }} onClick={handleChartClick}>
+            <ComposedChart 
+              data={mainChartData} 
+              margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+              onClick={handleChartClick}
+            >
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} dy={5} tickFormatter={formatMonth} interval={0} />
-              <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} />
-              <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{fill: '#475569', fontSize: 10, fontWeight: 600}} />
-              <Tooltip contentStyle={{borderRadius: '6px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px', padding: '8px'}} labelFormatter={formatMonth} formatter={(value, name) => [`${parseFloat(value).toFixed(2)} h`, name === 'besoin' ? 'Besoin (Nouv.)' : name === 'besoin_encours' ? 'Besoin (En cours)' : name === 'capacite' ? 'Capacité' : name]} />
-              <ReferenceLine y={0} yAxisId="right" stroke="#cbd5e1" strokeDasharray="3 3" />
-              <Bar yAxisId="left" stackId="a" dataKey="besoin" fill="#06b6d4" radius={[0, 0, 0, 0]} barSize={16}>
-                {monthlyAggregatedData.map((entry, index) => (<Cell key={`cell-besoin-${index}`} fillOpacity={selectedMonth && entry.month !== selectedMonth ? 0.3 : 1} />))}
+              {/* Note: dataKey="month" contient "2025-01" en vue mensuelle OU "S01" en vue hebdo (via la prop 'month' qu'on a mis dans weeklyAggregatedData) */}
+              <XAxis 
+                dataKey="month" 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{fill: '#64748b', fontSize: 10}} 
+                dy={5} 
+                tickFormatter={(val) => val.includes('-') ? formatMonth(val) : val} // Formatte si date, sinon laisse S01
+                interval={0} 
+              />
+              <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} />
+              <Tooltip 
+                cursor={{ fill: 'rgba(0,0,0,0.05)' }}
+                contentStyle={{borderRadius: '6px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px', padding: '8px'}}
+                labelFormatter={(val) => val.includes('-') ? formatMonth(val) : `Semaine ${val.replace('S','')}`}
+                formatter={(value, name) => [
+                  `${parseFloat(value).toFixed(1)} h`, 
+                  name === 'besoin' ? 'Besoin (Nouv.)' : name === 'besoin_encours' ? 'Besoin (En cours)' : name === 'capacite' ? 'Capacité' : name
+                ]}
+              />
+              
+              <Bar stackId="a" dataKey="besoin" fill="#06b6d4" radius={[0, 0, 0, 0]} barSize={selectedMonth ? 30 : 16}>
+                 {/* Pas de Cell nécessaire ici car la couleur est unie, sauf si on veut highlight */}
               </Bar>
-              <Bar yAxisId="left" stackId="a" dataKey="besoin_encours" fill="#f59e0b" radius={[3, 3, 0, 0]} barSize={16}>
-                 {monthlyAggregatedData.map((entry, index) => (<Cell key={`cell-encours-${index}`} fillOpacity={selectedMonth && entry.month !== selectedMonth ? 0.3 : 1} />))}
-              </Bar>
-              <Bar yAxisId="left" stackId="b" dataKey="capacite" fill="#a855f7" radius={[3, 3, 0, 0]} barSize={16}>
-                 {monthlyAggregatedData.map((entry, index) => (<Cell key={`cell-capa-${index}`} fillOpacity={selectedMonth && entry.month !== selectedMonth ? 0.3 : 1} />))}
-              </Bar>
-              <Line yAxisId="right" type="monotone" dataKey="soldeCumule" stroke="#475569" strokeWidth={2} dot={{r: 3, fill: '#475569', strokeWidth: 1, stroke: '#fff'}} activeDot={{r: 5}} />
+              <Bar stackId="a" dataKey="besoin_encours" fill="#f59e0b" radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
+
+              <Bar stackId="b" dataKey="capacite" fill="#a855f7" radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
+              
             </ComposedChart>
           </ResponsiveContainer>
         </div>
+        {!selectedMonth && <p className="text-[10px] text-center text-slate-400 italic mt-1">Cliquez sur un mois pour voir le détail par semaine</p>}
       </div>
 
-      {/* --- LISTE DÉTAILLÉE (DÉPLACÉE ICI & TRIABLE) --- */}
+      {/* --- LISTE DÉTAILLÉE --- */}
       <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden mb-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
         <button 
           onClick={() => setIsDetailListExpanded(!isDetailListExpanded)}
@@ -639,7 +671,7 @@ function MigrationDashboard() {
         >
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
             <TableIcon className="w-4 h-4 text-slate-400" />
-            Résultats Mensuels Détaillés
+            Résultats Mensuels Détaillés (Globaux)
           </h2>
           {isTableExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
         </button>
@@ -654,7 +686,6 @@ function MigrationDashboard() {
                   <th className="px-4 py-3 font-semibold text-right text-amber-500">Dont En Cours</th>
                   <th className="px-4 py-3 font-semibold text-right text-purple-600">Capacité</th> 
                   <th className="px-4 py-3 font-semibold text-right">Ecart Mensuel</th>
-                  <th className="px-4 py-3 font-semibold text-right text-slate-600">Stock Temps</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -669,9 +700,6 @@ function MigrationDashboard() {
                         {row.soldeMensuel > 0 ? '+' : ''}{row.soldeMensuel.toFixed(1)} h
                       </span>
                     </td>
-                    <td className="px-4 py-2 text-right font-bold text-slate-600">
-                      {row.soldeCumule > 0 ? '+' : ''}{row.soldeCumule.toFixed(1)} h
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -680,78 +708,39 @@ function MigrationDashboard() {
         )}
       </div>
 
-      {/* --- GRAPHIQUES SECONDAIRES (ACCORDÉONS INDÉPENDANTS) --- */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-        {/* Charge par Tech */}
-        <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden h-fit">
-            <button 
-                onClick={() => setIsTechChartExpanded(!isTechChartExpanded)}
-                className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors"
-            >
-                <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                    <Users className="w-4 h-4 text-slate-400" />
-                    Charge par Tech (h)
-                </h2>
-                {isTechChartExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
-            </button>
-            {isTechChartExpanded && (
-                <div className="h-48 w-full p-4 animate-in fade-in slide-in-from-top-2 duration-200">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={techAggregatedData} layout="vertical" margin={{ top: 0, right: 10, left: 10, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
-                        <XAxis type="number" hide />
-                        <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fill: '#475569', fontSize: 10, fontWeight: 500}} width={120} />
-                        <Tooltip cursor={{fill: 'transparent'}} contentStyle={{borderRadius: '6px', fontSize: '12px'}} formatter={(value) => [`${parseFloat(value).toFixed(1)} h`, '']} />
-                        <Bar dataKey="besoin" fill="#06b6d4" barSize={8} stackId="a" radius={[0, 0, 0, 0]} />
-                        <Bar dataKey="besoin_encours" fill="#f59e0b" barSize={8} stackId="a" radius={[0, 2, 2, 0]} />
-                        <Bar dataKey="capacite" fill="#a855f7" barSize={8} radius={[0, 2, 2, 0]} stackId="b" />
-                        </BarChart>
-                    </ResponsiveContainer>
-                </div>
-            )}
-        </div>
-
-        {/* Courbes Cumulées */}
-        <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden h-fit">
-            <button 
-                onClick={() => setIsCurvesExpanded(!isCurvesExpanded)}
-                className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors"
-            >
-                <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4 text-slate-400" />
-                    Courbes Cumulées
-                </h2>
-                {isCurvesExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
-            </button>
-            {isCurvesExpanded && (
-                <div className="h-48 w-full p-4 animate-in fade-in slide-in-from-top-2 duration-200">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={monthlyAggregatedData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
-                        <defs>
-                            <linearGradient id="gradCapacite" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#a855f7" stopOpacity={0.2}/> 
-                            <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
-                            </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                        <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fontSize: 10}} tickFormatter={formatMonth} interval={0} />
-                        <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10}} />
-                        <Tooltip contentStyle={{borderRadius: '6px', fontSize: '12px'}} />
-                        {selectedMonth && <ReferenceLine x={selectedMonth} stroke="#3b82f6" strokeDasharray="2 2" />}
-                        <Area type="monotone" dataKey="cumulCapacite" stroke="#a855f7" strokeWidth={2} fill="url(#gradCapacite)" /> 
-                        <Area type="monotone" dataKey="cumulBesoin" stroke="#06b6d4" strokeWidth={2} fill="transparent" strokeDasharray="3 3" /> 
-                        </AreaChart>
-                    </ResponsiveContainer>
-                </div>
-            )}
-        </div>
+      {/* --- CHARGE PAR TECH (TOUT EN BAS) --- */}
+      <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden h-fit mb-4">
+        <button 
+            onClick={() => setIsTechChartExpanded(!isTechChartExpanded)}
+            className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors"
+        >
+            <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                <Users className="w-4 h-4 text-slate-400" />
+                Charge par Tech {selectedMonth ? `(${formatMonth(selectedMonth)})` : "(Globale)"}
+            </h2>
+            {isTechChartExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
+        </button>
+        {isTechChartExpanded && (
+            <div className="h-64 w-full p-4 animate-in fade-in slide-in-from-top-2 duration-200">
+                <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={techAggregatedData} layout="vertical" margin={{ top: 0, right: 10, left: 10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
+                    <XAxis type="number" hide />
+                    <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fill: '#475569', fontSize: 10, fontWeight: 500}} width={120} />
+                    <Tooltip cursor={{fill: 'transparent'}} contentStyle={{borderRadius: '6px', fontSize: '12px'}} formatter={(value) => [`${parseFloat(value).toFixed(1)} h`, '']} />
+                    <Bar dataKey="besoin" fill="#06b6d4" barSize={12} stackId="a" radius={[0, 0, 0, 0]} />
+                    <Bar dataKey="besoin_encours" fill="#f59e0b" barSize={12} stackId="a" radius={[0, 2, 2, 0]} />
+                    <Bar dataKey="capacite" fill="#a855f7" barSize={12} radius={[0, 2, 2, 0]} stackId="b" />
+                    </BarChart>
+                </ResponsiveContainer>
+            </div>
+        )}
       </div>
 
     </div>
   );
 }
 
-// --- LE NOUVEAU GARDIEN DE SÉCURITÉ ---
 export default function App() {
   if (!clerkPubKey) {
     return (
