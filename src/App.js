@@ -63,9 +63,10 @@ function MigrationDashboard() {
   const [encoursData, setEncoursData] = useState([]);
   const [techList, setTechList] = useState(TECH_LIST_DEFAULT);
   
-  // États de chargement API
-  const [isLoading, setIsLoading] = useState(true); // Chargement activé par défaut au démarrage
-  const [debugData, setDebugData] = useState(null); 
+  // États de chargement API & DEBUG
+  const [isLoading, setIsLoading] = useState(true);
+  const [debugData, setDebugData] = useState(null); // Stocke la réponse brute de Snowflake
+  const [apiError, setApiError] = useState(null);   // Stocke les erreurs de connexion
 
   // États de l'interface
   const [selectedTech, setSelectedTech] = useState('Tous');
@@ -81,34 +82,47 @@ function MigrationDashboard() {
     const fetchData = async () => {
       console.log("🔒 Connexion Snowflake en cours...");
       setIsLoading(true);
+      setApiError(null);
 
       try {
         const token = await getToken();
         
-        // Appel API (à décommenter/adapter quand ton endpoint sera prêt)
-        /*
+        // --- APPEL API RÉEL ---
         const response = await fetch('/api/getData', {
           headers: { Authorization: `Bearer ${token}` }
         });
 
-        if (!response.ok) throw new Error(`Erreur API: ${response.status}`);
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Erreur API (${response.status}): ${errorText}`);
+        }
+
         const json = await response.json();
         
-        setDebugData(json); // Pour voir la structure brute
-        
-        // ADAPTATION REQUISE ICI SELON TA VUE SNOWFLAKE :
-        // Exemple : si ta vue renvoie un tableau unique d'événements
-        // setBackofficeData(json.data || []); 
-        */
+        // 1. On affiche la donnée brute dans la zone de debug
+        setDebugData(json); 
+        console.log("✅ Données reçues de Snowflake:", json);
 
-        // Simulation fin de chargement pour l'instant
-        setTimeout(() => {
-             console.log("✅ (Simulation) Données chargées ou dashboard prêt");
-             setIsLoading(false);
-        }, 1000);
+        // 2. LOGIQUE D'INJECTION DES DONNÉES (A adapter selon la structure de ta vue)
+        // Supposons que ton JSON ressemble à { data: [ ...toutes les lignes... ] }
+        if (json.data) {
+            // Filtrage basique si ta vue retourne tout en vrac
+            // Tu devras peut-être ajuster ces filtres selon les noms exacts dans Snowflake
+            // Exemple : 
+            // const allRows = json.data;
+            // setBackofficeData(allRows.filter(row => row.SOURCE === 'BACKOFFICE'));
+            // setEncoursData(allRows.filter(row => row.SOURCE === 'ENCOURS'));
+            
+            // Pour l'instant, si on ne sait pas trier, on met tout dans backofficeData pour voir
+            setBackofficeData(json.data); 
+        }
+
+        setIsLoading(false);
 
       } catch (err) {
         console.error("❌ Erreur API :", err);
+        setApiError(err.message);
+        setDebugData({ error: err.message }); // Pour l'afficher aussi dans la zone de debug
         setIsLoading(false);
       }
     };
@@ -117,10 +131,8 @@ function MigrationDashboard() {
   }, [getToken]);
   
   // --- TRAITEMENT DES DONNÉES (Core Logic) ---
-  // Note: Ce bloc s'exécutera même si les tableaux sont vides, renvoyant des stats à 0.
 
   const { detailedData, eventsData, planningCount } = useMemo(() => {
-    // Si pas de données, on retourne des objets vides pour afficher le dashboard à zéro
     if (backofficeData.length === 0 && encoursData.length === 0) {
         return { detailedData: [], eventsData: [], planningCount: 0 };
     }
@@ -129,33 +141,44 @@ function MigrationDashboard() {
     const planningEventsList = [];
     const monthlyStats = new Map();
 
-    // 1. Traitement Backoffice (Logique existante conservée)
+    // 1. Traitement Backoffice
     backofficeData.forEach(row => {
+      // Normalisation des clés (si Snowflake renvoie des majuscules/minuscules différentes)
       const cleanRow = {};
-      Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
+      Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]); // Garde la casse originale ou transforme ici
 
-      // ADAPTATION A FAIRE : Vérifier si les noms de colonnes 'Evènement', 'Date' existent dans ta vue Snowflake
-      if (!['Avocatmail - Analyse', 'Migration messagerie Adwin', 'Tache de backoffice Avocatmail'].includes(cleanRow['Evènement'])) return;
+      // IMPORTANT : Adapte ces noms de colonnes à ta vue Snowflake !
+      // Exemple : si Snowflake renvoie "EVENEMENT" en majuscule, change ici.
+      const typeEvent = cleanRow['Evènement'] || cleanRow['EVENEMENT'];
+      const dateEvent = cleanRow['Date'] || cleanRow['DATE_INTERVENTION'];
+      const resp = cleanRow['Responsable'] || cleanRow['RESPONSABLE'];
+      const duree = cleanRow['Durée'] || cleanRow['DUREE'];
+      const dossier = cleanRow['Dossier'] || cleanRow['DOSSIER'] || 'Client Inconnu';
+      const nbUsers = cleanRow['users'] || cleanRow['USERS'] || '1';
+
+      if (!typeEvent || !['Avocatmail - Analyse', 'Migration messagerie Adwin', 'Tache de backoffice Avocatmail'].includes(typeEvent)) return;
       
-      let dateStr = cleanRow['Date']; 
+      let dateStr = dateEvent; 
       if (!dateStr) return;
       
+      // Gestion format date
       if (dateStr.includes('/')) {
          const parts = dateStr.split(' ')[0].split('/');
          if (parts.length === 3) dateStr = `${parts[2]}-${parts[1]}-${parts[0]}`; 
+      } else if (dateStr.includes('T')) {
+          dateStr = dateStr.split('T')[0]; // Format ISO de Snowflake
       }
       
       const month = dateStr.substring(0, 7);
-      const tech = normalizeTechName(cleanRow['Responsable'], techList);
+      const tech = normalizeTechName(resp, techList);
       
       // Calcul Durée
       let duration = 0;
-      const dureeStr = cleanRow['Durée'];
-      if (dureeStr && typeof dureeStr === 'string' && dureeStr.includes(':')) {
-        const [h, m, s] = dureeStr.split(':').map(Number);
+      if (duree && typeof duree === 'string' && duree.includes(':')) {
+        const [h, m, s] = duree.split(':').map(Number);
         duration = (h || 0) + (m || 0)/60;
-      } else if (dureeStr) {
-          duration = parseFloat(String(dureeStr).replace(',', '.')) || 0;
+      } else if (duree) {
+          duration = parseFloat(String(duree).replace(',', '.')) || 0;
       }
 
       // Règles de calcul KPI
@@ -164,12 +187,12 @@ function MigrationDashboard() {
       let color = 'gray';
       let status = '';
 
-      if (cleanRow['Evènement'] === 'Tache de backoffice Avocatmail') {
+      if (typeEvent === 'Tache de backoffice Avocatmail') {
         capacite = duration;
         color = 'purple';
         status = 'Production (Backoffice)';
       } else {
-        const users = parseInt(cleanRow['users'] || '1', 10);
+        const users = parseInt(nbUsers, 10);
         besoin = 1.0;
         if (users > 5) besoin += (users - 5) * (10/60);
         color = 'cyan';
@@ -187,28 +210,32 @@ function MigrationDashboard() {
       events.push({
         date: dateStr,
         tech,
-        client: cleanRow['Dossier'] || cleanRow['Libellé'] || 'Client Inconnu',
-        type: cleanRow['Evènement'],
+        client: dossier,
+        type: typeEvent,
         duration: Math.max(besoin, capacite),
         status,
         color
       });
     });
 
-    // 2. Traitement Encours (Logique existante conservée)
+    // 2. Traitement Encours
     encoursData.forEach(row => {
         const cleanRow = {};
         Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
 
-        const tech = normalizeTechName(cleanRow['Interlocuteur'], techList);
-        const category = cleanRow['Catégorie'];
-        let lastActionDateStr = cleanRow['Dernière action'];
+        // ADAPTER AUX NOMS DE COLONNES SNOWFLAKE
+        const interlocuteur = cleanRow['Interlocuteur'] || cleanRow['INTERLOCUTEUR'];
+        const categorie = cleanRow['Catégorie'] || cleanRow['CATEGORIE'];
+        let lastAction = cleanRow['Dernière action'] || cleanRow['DERNIERE_ACTION'];
+        const client = cleanRow['Client'] || cleanRow['CLIENT'] || 'Client Inconnu';
+
+        const tech = normalizeTechName(interlocuteur, techList);
         
-        if (category === 'Prêt pour mise en place') {
+        if (categorie === 'Prêt pour mise en place') {
             planningEventsList.push({
                 date: "N/A",
                 tech,
-                client: cleanRow['Client'] || 'Client Inconnu',
+                client: client,
                 type: "Prêt pour Mise en Place",
                 duration: 0,
                 status: "A Planifier",
@@ -217,13 +244,15 @@ function MigrationDashboard() {
             return;
         }
 
-        if (lastActionDateStr) {
-            if (lastActionDateStr.includes('/')) {
-                const parts = lastActionDateStr.split(' ')[0].split('/');
-                if (parts.length === 3) lastActionDateStr = `${parts[2]}-${parts[1]}-${parts[0]}`;
+        if (lastAction) {
+            if (lastAction.includes('/')) {
+                const parts = lastAction.split(' ')[0].split('/');
+                if (parts.length === 3) lastAction = `${parts[2]}-${parts[1]}-${parts[0]}`;
+            } else if (lastAction.includes('T')) {
+                lastAction = lastAction.split('T')[0];
             }
             
-            const lastDate = new Date(lastActionDateStr);
+            const lastDate = new Date(lastAction);
             if (!isNaN(lastDate.getTime())) {
                 const targetDate = new Date(lastDate);
                 targetDate.setDate(targetDate.getDate() + 7); // J+7
@@ -240,7 +269,7 @@ function MigrationDashboard() {
                 events.push({
                     date: targetDateStr,
                     tech,
-                    client: cleanRow['Client'] || 'Client Inconnu',
+                    client: client,
                     type: "Analyse (En cours)",
                     duration: 1.0,
                     status: "En attente (Encours)",
@@ -260,7 +289,7 @@ function MigrationDashboard() {
     };
   }, [backofficeData, encoursData, techList]);
 
-  // --- LOGIQUE D'AFFICHAGE ---
+  // --- LOGIQUE D'AFFICHAGE (IDENTIQUE) ---
 
   const filteredRawData = useMemo(() => {
     if (selectedTech === 'Tous') return detailedData;
@@ -382,6 +411,27 @@ function MigrationDashboard() {
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500">
       
+      {/* --- ZONE DE DEBUG (RÉACTIVÉE) --- */}
+      {/* Cette zone s'affiche si 'debugData' contient quelque chose (succès ou erreur) */}
+      {debugData && (
+        <div className="bg-gray-900 text-green-400 p-4 mb-6 rounded-lg font-mono text-xs overflow-auto max-h-60 border-2 border-green-500 shadow-xl relative group">
+            <button 
+                onClick={() => setDebugData(null)} 
+                className="absolute top-2 right-2 text-gray-400 hover:text-white bg-gray-800 p-1 rounded"
+            >
+                <X className="w-4 h-4" />
+            </button>
+            <h3 className="font-bold text-white mb-2 text-sm border-b border-gray-700 pb-1 flex items-center gap-2">
+                <Activity className="w-4 h-4 text-green-500" />
+                RÉPONSE SNOWFLAKE API
+                {apiError && <span className="text-red-400 ml-2">(ERREUR DÉTECTÉE)</span>}
+            </h3>
+            <pre className="whitespace-pre-wrap">
+                {JSON.stringify(debugData, null, 2)}
+            </pre>
+        </div>
+      )}
+
       {/* HEADER */}
       <header className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
         <div className="flex items-center gap-3">
@@ -686,56 +736,4 @@ function MigrationDashboard() {
                     </td>
                     <td className="px-2 py-1 whitespace-nowrap truncate max-w-[150px]">{event.tech}</td>
                     <td className="px-2 py-1 font-medium text-slate-700 whitespace-nowrap truncate max-w-[200px]" title={event.client}>{event.client}</td>
-                    <td className="px-2 py-1 text-slate-500 whitespace-nowrap">{event.type}</td>
-                    <td className="px-2 py-1 text-right font-medium whitespace-nowrap">
-                      {event.duration > 0 ? event.duration.toFixed(2) : '-'}
-                    </td>
-                    <td className="px-2 py-1 text-center whitespace-nowrap">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider
-                        ${event.color === 'cyan' ? 'bg-cyan-100 text-cyan-700' : 
-                          event.color === 'purple' ? 'bg-purple-100 text-purple-700' : 
-                          event.color === 'indigo' ? 'bg-indigo-100 text-indigo-700' : 
-                          event.color === 'amber' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
-                        {event.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-                {filteredEvents.length === 0 && (
-                  <tr>
-                    <td colSpan="6" className="px-4 py-8 text-center text-slate-400 italic">
-                      Aucun événement trouvé pour cette sélection.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-    </div>
-  );
-}
-
-// --- LE NOUVEAU GARDIEN DE SÉCURITÉ ---
-export default function App() {
-  if (!clerkPubKey) {
-    return (
-      <div className="flex items-center justify-center h-screen text-red-600 font-bold">
-        Erreur : Clé Clerk (REACT_APP_CLERK_PUBLISHABLE_KEY) manquante dans Vercel.
-      </div>
-    );
-  }
-
-  return (
-    <ClerkProvider publishableKey={clerkPubKey}>
-      <SignedIn>
-        <MigrationDashboard />
-      </SignedIn>
-      <SignedOut>
-        <RedirectToSignIn />
-      </SignedOut>
-    </ClerkProvider>
-  );
-}
+                    <td className="
