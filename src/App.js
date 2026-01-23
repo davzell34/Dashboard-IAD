@@ -103,7 +103,7 @@ const calculateDuration = (duree) => {
     return 0;
 };
 
-// --- CALCUL AVANCEMENT (CORRIGÉ) ---
+// --- CALCUL AVANCEMENT ---
 const getRemainingLoad = (categorie) => {
     if (!categorie) return 0.5; 
 
@@ -116,12 +116,9 @@ const getRemainingLoad = (categorie) => {
     else if (cat.includes('Bloqué cause client/presta')) completion = 0.05;
     else if (cat.includes('Copie en cours')) completion = 0.75;
     else if (cat.includes('Suspendu')) completion = 0.05;
+    else if (cat.includes('Prêt pour mise en place')) completion = 1.0; 
+    else if (cat.includes('A planifier')) completion = 1.0; 
     
-    // --- CES CATEGORIES SONT CONSIDEREES COMME TERMINEES POUR LE TECH ---
-    else if (cat.includes('Prêt pour mise en place')) completion = 1.0; // 100% Fini
-    else if (cat.includes('A planifier')) completion = 1.0; // 100% Fini (CORRIGÉ)
-    
-    // Charge Restante = 1h * (100% - Avancement)
     return Math.max(0, 1.0 * (1 - completion));
 };
 
@@ -253,7 +250,6 @@ function MigrationDashboard() {
         if (!dateStr || !resp) return;
         const tech = normalizeTechName(resp, techList);
         
-        // FILTRE STRICT
         if (!techList.includes(tech)) return;
 
         const dateEvent = parseDateSafe(dateStr);
@@ -298,6 +294,14 @@ function MigrationDashboard() {
     };
 
     // 2. BACKOFFICE (TRAITEMENT PRINCIPAL)
+    // Liste des événements considérés comme du "Besoin"
+    const allowedNeedEvents = [
+        'Avocatmail - Analyse', 
+        'Migration messagerie Adwin', 
+        'Migration messagerie Adwin - analyse', // NOUVEAU NOM
+        'Tache de backoffice Avocatmail' // Lui c'est de la capa
+    ];
+
     backofficeData.forEach(row => {
       const cleanRow = {};
       Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
@@ -310,7 +314,7 @@ function MigrationDashboard() {
       const dossier = cleanRow['DOSSIER'] || cleanRow['LIBELLE'] || 'Client Inconnu';
       const nbUsers = cleanRow['USER'] || cleanRow['NB_USERS'] || '1';
 
-      if (!typeEvent || !['Avocatmail - Analyse', 'Migration messagerie Adwin', 'Tache de backoffice Avocatmail'].includes(typeEvent)) return;
+      if (!typeEvent || !allowedNeedEvents.includes(typeEvent)) return;
       
       const tech = normalizeTechName(resp, techList);
       if (!techList.includes(tech)) return;
@@ -333,6 +337,7 @@ function MigrationDashboard() {
         color = 'purple';
         status = 'Production (Backoffice)';
       } else {
+        // C'est un besoin (Analyse ou Migration, ancien ou nouveau nom)
         const users = parseInt(nbUsers, 10);
         besoin = 1.0;
         if (users > 5) besoin += (users - 5) * (10/60);
@@ -398,8 +403,6 @@ function MigrationDashboard() {
         // CALCUL DE LA CHARGE RESTANTE
         const remainingLoad = getRemainingLoad(categorie);
 
-        // Si la charge restante est 0 (ex: "A planifier" = 100% fini), 
-        // on ne l'affiche pas dans les graphiques de charge
         if (remainingLoad <= 0) return;
 
         // CAS 1 : DATE DE REPORT FORCÉE
@@ -412,8 +415,6 @@ function MigrationDashboard() {
         // CAS 2 : GLISSEMENT SUR PROCHAIN CRÉNEAU
         else {
             const techSlots = techBackofficeSchedule[tech] || [];
-            
-            // On cherche le PREMIER créneau disponible >= AUJOURD'HUI
             const targetSlotTime = techSlots.find(t => t >= todayTime);
 
             if (targetSlotTime) {
@@ -421,7 +422,6 @@ function MigrationDashboard() {
                 status = "Auto (Prochain BO)";
                 color = "amber";
             } else {
-                // FALLBACK
                 targetDate = new Date(today);
                 targetDate.setDate(today.getDate() + 7);
                 status = "En attente (Pas de BO dispo)";
@@ -433,7 +433,6 @@ function MigrationDashboard() {
             const targetDateStr = targetDate.toISOString().split('T')[0];
             const targetMonth = targetDateStr.substring(0, 7);
 
-            // On ajoute la charge PONDÉRÉE (ex: 0.25h)
             addToStats(targetMonth, tech, 0, remainingLoad, 0);
 
             events.push({
@@ -441,7 +440,7 @@ function MigrationDashboard() {
                 tech,
                 client: clientName,
                 type: `Encours (${categorie || "Non classé"})`,
-                duration: remainingLoad, // Durée affichée = Reste à faire
+                duration: remainingLoad,
                 status: status,
                 color: color,
                 raw_besoin: 0,
