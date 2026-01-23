@@ -251,16 +251,18 @@ function MigrationDashboard() {
     let countReadyMiseEnPlace = 0;
     let countReadyAnalyse = 0; 
 
-    const addToStats = (month, tech, besoin, besoin_encours, capacite) => {
+    // Helper pour ajouter aux stats. Nouvel argument: besoin_retard (histo)
+    const addToStats = (month, tech, besoin, besoin_encours, capacite, besoin_retard = 0) => {
         monthsSet.add(month);
         const key = `${month}_${tech}`;
         if (!monthlyStats.has(key)) {
-            monthlyStats.set(key, { month, tech, besoin: 0, besoin_encours: 0, capacite: 0 });
+            monthlyStats.set(key, { month, tech, besoin: 0, besoin_encours: 0, capacite: 0, besoin_retard: 0 });
         }
         const entry = monthlyStats.get(key);
         entry.besoin += besoin;
         entry.besoin_encours += besoin_encours;
         entry.capacite += capacite;
+        entry.besoin_retard += besoin_retard;
     };
 
     // 2. BACKOFFICE (TRAITEMENT PRINCIPAL)
@@ -316,11 +318,12 @@ function MigrationDashboard() {
         color,
         raw_besoin: besoin,
         raw_capacite: capacite,
-        raw_besoin_encours: 0
+        raw_besoin_encours: 0,
+        raw_besoin_retard: 0
       });
     });
 
-    // 3. ENCOURS (LOGIQUE GLISSANTE)
+    // 3. ENCOURS (LOGIQUE GLISSANTE + HISTORISATION)
     
     // Définition de "Aujourd'hui" (Minuit) pour la comparaison
     const today = new Date();
@@ -332,8 +335,8 @@ function MigrationDashboard() {
         Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
         const techNameRaw = cleanRow['RESPONSABLE'];
         const categorie = cleanRow['CATEGORIE'];
-        // const lastActionStr = cleanRow['DERNIERE_ACTION']; // Plus utilisé pour le calcul de date cible si auto
         const reportDateStr = cleanRow['REPORTE_LE'];
+        const lastActionStr = cleanRow['DERNIERE_ACTION'];
         const clientName = cleanRow['INTERLOCUTEUR'] || 'Client Inconnu';
         const tech = normalizeTechName(techNameRaw, techList);
         
@@ -354,61 +357,84 @@ function MigrationDashboard() {
             });
         }
 
-        let targetDate = null;
-        let status = "";
-        let color = "";
-        let isReported = false;
-
         const reportDate = parseDateSafe(reportDateStr);
+        const lastActionDate = parseDateSafe(lastActionStr); // Pour déterminer le début de l'historique
 
         // CAS 1 : DATE DE REPORT FORCÉE (Priorité Absolue)
         if (reportDate) {
-            targetDate = reportDate;
-            status = "Reporté";
-            color = "red";
-            isReported = true;
+            const targetDateStr = reportDate.toISOString().split('T')[0];
+            const targetMonth = targetDateStr.substring(0, 7);
+            addToStats(targetMonth, tech, 0, 1.0, 0);
+            events.push({
+                date: targetDateStr, tech, client: clientName,
+                type: "Analyse (Reportée)", duration: 1.0, status: "Reporté", color: "red",
+                raw_besoin: 0, raw_capacite: 0, raw_besoin_encours: 1.0, raw_besoin_retard: 0
+            });
         } 
-        // CAS 2 : PLANIFICATION AUTOMATIQUE GLISSANTE
+        // CAS 2 : PLANIFICATION AUTOMATIQUE GLISSANTE AVEC HISTORIQUE
         else {
-            // On cherche le prochain créneau BO pour CE technicien A PARTIR D'AUJOURD'HUI
-            // Peu importe quand était la dernière action, le travail est à faire dans le futur.
             const techSlots = techBackofficeSchedule[tech] || [];
             
-            // Trouver le premier slot >= Aujourd'hui
-            const nextSlotTime = techSlots.find(t => t >= todayTime);
+            // Déterminer la date de début de "l'existence" de ce ticket pour la prod
+            // Si pas de dernière action, on ne peut pas historiser, on met juste au futur
+            const startHistoryTime = lastActionDate ? lastActionDate.getTime() : todayTime;
 
-            if (nextSlotTime) {
-                targetDate = new Date(nextSlotTime);
-                status = "Auto (Prochain BO)";
-                color = "amber"; // Orange : Planifié automatiquement
-            } else {
-                // FALLBACK : Si pas de créneau futur (ou technicien inconnu), on met à J+7
-                targetDate = new Date(today);
-                targetDate.setDate(today.getDate() + 7);
-                status = "En attente (Pas de BO dispo)";
-                color = "slate"; // Gris : Pas de créneau trouvé
-            }
-        }
+            let futureSlotFound = false;
 
-        if (targetDate) {
-            const targetDateStr = targetDate.toISOString().split('T')[0];
-            const targetMonth = targetDateStr.substring(0, 7);
+            // ON PARCOURT TOUS LES SLOTS DU TECH (Passés et Futurs)
+            techSlots.forEach(slotTime => {
+                if (futureSlotFound) return; // On a déjà trouvé le slot futur, on arrête (le ticket n'est pas dupliqué dans le futur)
 
-            // On réserve 1h de charge
-            addToStats(targetMonth, tech, 0, 1.0, 0);
+                // Si le slot est avant la création/action du ticket, il n'est pas concerné
+                if (slotTime < startHistoryTime) return;
 
-            events.push({
-                date: targetDateStr,
-                tech,
-                client: clientName,
-                type: isReported ? "Analyse (Reportée)" : "Analyse (En cours)",
-                duration: 1.0,
-                status: status,
-                color: color,
-                raw_besoin: 0,
-                raw_capacite: 0,
-                raw_besoin_encours: 1.0
+                // Si le slot est PASSÉ (avant aujourd'hui) -> C'est de l'historique (Dette)
+                if (slotTime < todayTime) {
+                    const d = new Date(slotTime);
+                    const dStr = d.toISOString().split('T')[0];
+                    const mStr = dStr.substring(0, 7);
+                    
+                    // On ajoute une charge "Retard"
+                    addToStats(mStr, tech, 0, 0, 0, 1.0); // 1h de retard
+                    
+                    events.push({
+                        date: dStr, tech, client: clientName,
+                        type: "Non traité (Historique)", duration: 1.0, status: "Non traité", color: "slate",
+                        raw_besoin: 0, raw_capacite: 0, raw_besoin_encours: 0, raw_besoin_retard: 1.0
+                    });
+                } 
+                // Si le slot est FUTUR (ou Aujourd'hui) -> C'est la charge active
+                else {
+                    const d = new Date(slotTime);
+                    const dStr = d.toISOString().split('T')[0];
+                    const mStr = dStr.substring(0, 7);
+                    
+                    addToStats(mStr, tech, 0, 1.0, 0, 0); // 1h de charge active
+                    
+                    events.push({
+                        date: dStr, tech, client: clientName,
+                        type: "Analyse (En cours)", duration: 1.0, status: "Auto (Prochain BO)", color: "amber",
+                        raw_besoin: 0, raw_capacite: 0, raw_besoin_encours: 1.0, raw_besoin_retard: 0
+                    });
+                    
+                    futureSlotFound = true; // On a placé le ticket, on arrête la boucle
+                }
             });
+
+            // FALLBACK : Si on a parcouru tous les slots et rien trouvé dans le futur
+            if (!futureSlotFound) {
+                const targetDate = new Date(today);
+                targetDate.setDate(today.getDate() + 7);
+                const dStr = targetDate.toISOString().split('T')[0];
+                const mStr = dStr.substring(0, 7);
+                
+                addToStats(mStr, tech, 0, 1.0, 0, 0);
+                events.push({
+                    date: dStr, tech, client: clientName,
+                    type: "Analyse (En cours)", duration: 1.0, status: "En attente (Pas de BO dispo)", color: "slate",
+                    raw_besoin: 0, raw_capacite: 0, raw_besoin_encours: 1.0, raw_besoin_retard: 0
+                });
+            }
         }
     });
 
@@ -457,17 +483,17 @@ function MigrationDashboard() {
     return events;
   }, [selectedTech, selectedMonth, showPlanning, eventsData, sortConfig]);
 
-  // --- CORRECTION : AGREGATION MENSUELLE PAR BOUCLE MATHÉMATIQUE ---
   const monthlyAggregatedData = useMemo(() => {
     if (detailedData.length === 0) return [];
     
     const dataToUse = selectedTech === 'Tous' ? detailedData : detailedData.filter(d => d.tech === selectedTech);
     const aggMap = new Map();
     dataToUse.forEach(item => {
-      if (!aggMap.has(item.month)) aggMap.set(item.month, { month: item.month, label: formatMonthShort(item.month), besoin: 0, besoin_encours: 0, capacite: 0 });
+      if (!aggMap.has(item.month)) aggMap.set(item.month, { month: item.month, label: formatMonthShort(item.month), besoin: 0, besoin_encours: 0, besoin_retard: 0, capacite: 0 });
       const entry = aggMap.get(item.month);
       entry.besoin += item.besoin;
       entry.besoin_encours += item.besoin_encours;
+      entry.besoin_retard += item.besoin_retard;
       entry.capacite += item.capacite;
     });
 
@@ -483,8 +509,9 @@ function MigrationDashboard() {
 
     while (currentY < endYear || (currentY === endYear && currentM <= endMonth)) {
         const mStr = `${currentY}-${String(currentM).padStart(2, '0')}`;
-        const data = aggMap.get(mStr) || { month: mStr, label: formatMonthShort(mStr), besoin: 0, besoin_encours: 0, capacite: 0 };
-        const totalBesoinMois = data.besoin + data.besoin_encours;
+        const data = aggMap.get(mStr) || { month: mStr, label: formatMonthShort(mStr), besoin: 0, besoin_encours: 0, besoin_retard: 0, capacite: 0 };
+        // Le besoin total inclut le retard (historique) + le besoin courant + le besoin encours
+        const totalBesoinMois = data.besoin + data.besoin_encours + data.besoin_retard;
         result.push({
             ...data,
             totalBesoinMois,
@@ -515,12 +542,13 @@ function MigrationDashboard() {
                   month: weekNum, 
                   label: label, 
                   weekSort: parseInt(weekNum.replace('S', '')),
-                  besoin: 0, besoin_encours: 0, capacite: 0 
+                  besoin: 0, besoin_encours: 0, besoin_retard: 0, capacite: 0 
               });
           }
           const entry = weekMap.get(weekNum);
           entry.besoin += (evt.raw_besoin || 0);
           entry.besoin_encours += (evt.raw_besoin_encours || 0);
+          entry.besoin_retard += (evt.raw_besoin_retard || 0);
           entry.capacite += (evt.raw_capacite || 0);
       });
 
@@ -535,10 +563,11 @@ function MigrationDashboard() {
     if(selectedMonth) eventsToUse = eventsToUse.filter(e => e.date.startsWith(selectedMonth));
 
     eventsToUse.forEach(item => {
-      if (!aggMap.has(item.tech)) aggMap.set(item.tech, { name: item.tech, besoin: 0, besoin_encours: 0, capacite: 0 });
+      if (!aggMap.has(item.tech)) aggMap.set(item.tech, { name: item.tech, besoin: 0, besoin_encours: 0, besoin_retard: 0, capacite: 0 });
       const entry = aggMap.get(item.tech);
       entry.besoin += (item.raw_besoin || 0);
       entry.besoin_encours += (item.raw_besoin_encours || 0);
+      entry.besoin_retard += (item.raw_besoin_retard || 0);
       entry.capacite += (item.raw_capacite || 0);
     });
     return Array.from(aggMap.values());
@@ -546,7 +575,9 @@ function MigrationDashboard() {
 
   const kpiStats = useMemo(() => {
     if (mainChartData.length === 0) return { besoin: 0, capacite: 0, ratio: 0 };
-    const totalBesoin = mainChartData.reduce((acc, curr) => acc + (curr.totalBesoinMois || (curr.besoin + curr.besoin_encours)), 0);
+    // Attention : pour le KPI "Besoin Total", on ne compte généralement que le travail à faire (Futur)
+    // Si on inclut l'historique, le chiffre sera énorme. Ici je compte TOUT (y compris historique) car c'est la vue "Charge".
+    const totalBesoin = mainChartData.reduce((acc, curr) => acc + (curr.totalBesoinMois || (curr.besoin + curr.besoin_encours + curr.besoin_retard)), 0);
     const totalCapacite = mainChartData.reduce((acc, curr) => acc + curr.capacite, 0);
     const ratio = totalBesoin > 0 ? (totalCapacite / totalBesoin) * 100 : 0;
     return { besoin: totalBesoin, capacite: totalCapacite, ratio };
@@ -642,6 +673,7 @@ function MigrationDashboard() {
                 </div>
             )}
             <div className="flex gap-3 text-[10px] font-medium uppercase tracking-wider text-slate-500 ml-auto">
+                <div className="flex items-center gap-1"><span className="w-2 h-2 bg-slate-400 rounded-full"></span> Historique</div>
                 <div className="flex items-center gap-1"><span className="w-2 h-2 bg-cyan-500 rounded-full"></span> Besoin</div>
                 <div className="flex items-center gap-1"><span className="w-2 h-2 bg-amber-500 rounded-full"></span> En Cours</div>
                 <div className="flex items-center gap-1"><span className="w-2 h-2 bg-purple-500 rounded-full"></span> Capacité</div>
@@ -671,10 +703,14 @@ function MigrationDashboard() {
                     if (String(val).startsWith('S')) return val; 
                     return formatMonth(val);
                 }}
-                formatter={(value, name) => [`${parseFloat(value).toFixed(1)} h`, name === 'besoin' ? 'Besoin (Nouv.)' : name === 'besoin_encours' ? 'Besoin (En cours)' : name === 'capacite' ? 'Capacité' : name]} 
+                formatter={(value, name) => [`${parseFloat(value).toFixed(1)} h`, name === 'besoin' ? 'Besoin (Nouv.)' : name === 'besoin_encours' ? 'Besoin (En cours)' : name === 'besoin_retard' ? 'Historique (Non traité)' : name === 'capacite' ? 'Capacité' : name]} 
               />
+              
+              {/* ORDRE DES BARRES EMPILÉES : Histo > Besoin > Encours */}
+              <Bar stackId="a" dataKey="besoin_retard" fill="#94a3b8" radius={[0, 0, 0, 0]} barSize={selectedMonth ? 30 : 16} /> {/* Slate-400 */}
               <Bar stackId="a" dataKey="besoin" fill="#06b6d4" radius={[0, 0, 0, 0]} barSize={selectedMonth ? 30 : 16} />
               <Bar stackId="a" dataKey="besoin_encours" fill="#f59e0b" radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
+              
               <Bar stackId="b" dataKey="capacite" fill="#a855f7" radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
             </ComposedChart>
           </ResponsiveContainer>
@@ -712,7 +748,7 @@ function MigrationDashboard() {
                     <td className="px-2 py-1 font-medium text-slate-700 whitespace-nowrap truncate max-w-[200px]" title={event.client}>{event.client}</td>
                     <td className="px-2 py-1 text-slate-500 whitespace-nowrap">{event.type}</td>
                     <td className="px-2 py-1 text-right font-medium whitespace-nowrap">{event.duration > 0 ? event.duration.toFixed(2) : '-'}</td>
-                    <td className="px-2 py-1 text-center whitespace-nowrap"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${event.color === 'cyan' ? 'bg-cyan-100 text-cyan-700' : event.color === 'purple' ? 'bg-purple-100 text-purple-700' : event.color === 'indigo' ? 'bg-indigo-100 text-indigo-700' : event.color === 'amber' ? 'bg-amber-100 text-amber-700' : event.color === 'red' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>{event.status}</span></td>
+                    <td className="px-2 py-1 text-center whitespace-nowrap"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${event.color === 'cyan' ? 'bg-cyan-100 text-cyan-700' : event.color === 'purple' ? 'bg-purple-100 text-purple-700' : event.color === 'indigo' ? 'bg-indigo-100 text-indigo-700' : event.color === 'amber' ? 'bg-amber-100 text-amber-700' : event.color === 'red' ? 'bg-red-100 text-red-700' : event.color === 'slate' ? 'bg-slate-200 text-slate-600' : 'bg-blue-100 text-blue-700'}`}>{event.status}</span></td>
                   </tr>
                 ))}
                 {filteredAndSortedEvents.length === 0 && (<tr><td colSpan="6" className="px-4 py-8 text-center text-slate-400 italic">Aucun événement trouvé.</td></tr>)}
@@ -738,8 +774,11 @@ function MigrationDashboard() {
                         <XAxis type="number" hide />
                         <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fill: '#475569', fontSize: 10, fontWeight: 500}} width={120} />
                         <Tooltip cursor={{fill: 'transparent'}} contentStyle={{borderRadius: '6px', fontSize: '12px'}} formatter={(value) => [`${parseFloat(value).toFixed(1)} h`, '']} />
+                        
+                        <Bar dataKey="besoin_retard" fill="#94a3b8" barSize={12} stackId="a" radius={[0, 0, 0, 0]} />
                         <Bar dataKey="besoin" fill="#06b6d4" barSize={12} stackId="a" radius={[0, 0, 0, 0]} />
                         <Bar dataKey="besoin_encours" fill="#f59e0b" barSize={12} stackId="a" radius={[0, 2, 2, 0]} />
+                        
                         <Bar dataKey="capacite" fill="#a855f7" barSize={12} radius={[0, 2, 2, 0]} stackId="b" />
                         </BarChart>
                     </ResponsiveContainer>
@@ -759,13 +798,21 @@ function MigrationDashboard() {
           <div className="overflow-x-auto animate-in fade-in slide-in-from-top-2 duration-200">
             <table className="w-full text-sm text-left text-slate-600">
               <thead className="text-xs text-slate-500 uppercase bg-slate-50/50 border-b border-slate-100">
-                <tr><th className="px-4 py-3 font-semibold">Mois</th><th className="px-4 py-3 font-semibold text-right">Besoin Total</th><th className="px-4 py-3 font-semibold text-right text-amber-500">Dont En Cours</th><th className="px-4 py-3 font-semibold text-right text-purple-600">Capacité</th> <th className="px-4 py-3 font-semibold text-right">Ecart Mensuel</th></tr>
+                <tr>
+                    <th className="px-4 py-3 font-semibold">Mois</th>
+                    <th className="px-4 py-3 font-semibold text-right">Besoin Total</th>
+                    <th className="px-4 py-3 font-semibold text-right text-slate-500">Dont Histo</th>
+                    <th className="px-4 py-3 font-semibold text-right text-amber-500">Dont En Cours</th>
+                    <th className="px-4 py-3 font-semibold text-right text-purple-600">Capacité</th> 
+                    <th className="px-4 py-3 font-semibold text-right">Ecart Mensuel</th>
+                </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {monthlyAggregatedData.map((row) => (
                   <tr key={row.month} className={`hover:bg-slate-50 transition-colors ${selectedMonth === row.month ? 'bg-blue-50/50' : ''}`}>
                     <td className="px-4 py-2 font-medium text-slate-800 capitalize">{row.label}</td>
                     <td className="px-4 py-2 text-right">{row.totalBesoinMois.toFixed(1)} h</td>
+                    <td className="px-4 py-2 text-right text-slate-400">{row.besoin_retard > 0 ? `${row.besoin_retard.toFixed(1)} h` : '-'}</td>
                     <td className="px-4 py-2 text-right text-amber-500">{row.besoin_encours > 0 ? `${row.besoin_encours.toFixed(1)} h` : '-'}</td>
                     <td className="px-4 py-2 text-right text-purple-600 font-medium">{row.capacite.toFixed(1)} h</td>
                     <td className="px-4 py-2 text-right"><span className={`px-2 py-0.5 rounded text-xs font-medium ${row.soldeMensuel >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{row.soldeMensuel > 0 ? '+' : ''}{row.soldeMensuel.toFixed(1)} h</span></td>
