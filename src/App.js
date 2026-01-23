@@ -11,7 +11,6 @@ import {
 import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
 
 // --- CONFIGURATION ---
-// Liste STRICTE des techniciens autorisés
 const TECH_LIST_DEFAULT = [
     "Zakaria AYAT", 
     "Jean-michel MESSIN", 
@@ -28,18 +27,11 @@ const normalizeTechName = (name, techList) => {
   if (!name || typeof name !== 'string') return "Inconnu";
   const cleanName = name.trim();
   const upperName = cleanName.toUpperCase();
-  
   for (const tech of techList) {
-    // 1. Correspondance exacte
     if (tech.toUpperCase() === upperName) return tech;
-    // 2. Correspondance sur le nom de famille (Dernier mot)
     const lastName = tech.split(' ').pop().toUpperCase();
-    // On s'assure que le nom de famille est bien dans la chaine (ex: "GAMONDES" dans "Rodercik GAMONDES")
     if (upperName.includes(lastName)) return tech;
   }
-  
-  // Si aucune correspondance dans la liste officielle, on renvoie le nom brut
-  // (Il sera filtré plus tard dans la boucle principale)
   return cleanName;
 };
 
@@ -238,22 +230,18 @@ function MigrationDashboard() {
 
         if (!dateStr || !resp) return;
         const tech = normalizeTechName(resp, techList);
-
-        // --- FILTRE STRICT : On ignore si ce n'est pas un tech de la liste ---
-        if (!techList.includes(tech)) return; 
+        if (!techList.includes(tech)) return;
 
         const dateEvent = parseDateSafe(dateStr);
         if(!dateEvent) return;
         
         const dateKey = dateEvent.toISOString().split('T')[0];
         
-        // A. Indexation des créneaux
         if (typeEvent === 'Tache de backoffice Avocatmail') {
             if (!techBackofficeSchedule[tech]) techBackofficeSchedule[tech] = [];
             techBackofficeSchedule[tech].push(dateEvent.getTime()); 
         }
         
-        // B. Calcul des Déductions
         if (typeEvent !== 'Tache de backoffice Avocatmail' && timeStr) {
             const timeKey = timeStr.substring(0, 5); 
             const key = `${dateKey}_${timeKey}_${tech}`;
@@ -270,7 +258,6 @@ function MigrationDashboard() {
     let countReadyMiseEnPlace = 0;
     let countReadyAnalyse = 0; 
 
-    // Helper pour ajouter aux stats.
     const addToStats = (month, tech, besoin, besoin_encours, capacite, besoin_retard = 0) => {
         monthsSet.add(month);
         const key = `${month}_${tech}`;
@@ -300,8 +287,6 @@ function MigrationDashboard() {
       if (!typeEvent || !['Avocatmail - Analyse', 'Migration messagerie Adwin', 'Tache de backoffice Avocatmail'].includes(typeEvent)) return;
       
       const tech = normalizeTechName(resp, techList);
-      
-      // --- FILTRE STRICT ---
       if (!techList.includes(tech)) return;
 
       const dateEvent = parseDateSafe(dateStr);
@@ -346,9 +331,7 @@ function MigrationDashboard() {
       });
     });
 
-    // 3. ENCOURS (LOGIQUE GLISSANTE + HISTORISATION)
-    
-    // Définition de "Aujourd'hui" (Minuit) pour la comparaison
+    // 3. ENCOURS (LOGIQUE SIMPLIFIÉE : 1 Ticket = 1 Barre Unique)
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const todayTime = today.getTime();
@@ -363,7 +346,6 @@ function MigrationDashboard() {
         const clientName = cleanRow['INTERLOCUTEUR'] || 'Client Inconnu';
         const tech = normalizeTechName(techNameRaw, techList);
         
-        // --- FILTRE STRICT ---
         if (!techList.includes(tech)) return;
 
         if (categorie === 'Prêt pour mise en place') {
@@ -384,9 +366,9 @@ function MigrationDashboard() {
         }
 
         const reportDate = parseDateSafe(reportDateStr);
-        const lastActionDate = parseDateSafe(lastActionStr); // Pour déterminer le début de l'historique
+        const lastActionDate = parseDateSafe(lastActionStr); 
 
-        // CAS 1 : DATE DE REPORT FORCÉE (Priorité Absolue)
+        // CAS 1 : REPORT FORCÉ
         if (reportDate) {
             const targetDateStr = reportDate.toISOString().split('T')[0];
             const targetMonth = targetDateStr.substring(0, 7);
@@ -397,66 +379,51 @@ function MigrationDashboard() {
                 raw_besoin: 0, raw_capacite: 0, raw_besoin_encours: 1.0, raw_besoin_retard: 0
             });
         } 
-        // CAS 2 : PLANIFICATION AUTOMATIQUE GLISSANTE AVEC HISTORIQUE
+        // CAS 2 : PLACEMENT AUTOMATIQUE (HISTORIQUE OU FUTUR)
         else {
             const techSlots = techBackofficeSchedule[tech] || [];
             
-            // Déterminer la date de début de "l'existence" de ce ticket pour la prod
-            const startHistoryTime = lastActionDate ? lastActionDate.getTime() : todayTime;
+            // Point de départ : Dernière action (ou aujourd'hui si vide)
+            const refTime = lastActionDate ? lastActionDate.getTime() : todayTime;
 
-            let futureSlotFound = false;
+            // On cherche le PREMIER créneau disponible >= RefTime
+            // (On ne boucle plus sur tous les créneaux, on prend juste le premier pertinent)
+            const targetSlotTime = techSlots.find(t => t >= refTime);
 
-            // ON PARCOURT TOUS LES SLOTS DU TECH (Passés et Futurs)
-            techSlots.forEach(slotTime => {
-                if (futureSlotFound) return; 
+            let targetDate = null;
+            let isHistory = false;
 
-                // Si le slot est avant la création/action du ticket, il n'est pas concerné
-                if (slotTime < startHistoryTime) return;
+            if (targetSlotTime) {
+                targetDate = new Date(targetSlotTime);
+            } else {
+                // Si pas de créneau trouvé dans la liste (fin de calendrier ou tech sans slot)
+                // On met une date par défaut (J+7)
+                targetDate = new Date(refTime);
+                targetDate.setDate(targetDate.getDate() + 7);
+            }
 
-                // Si le slot est PASSÉ (avant aujourd'hui) -> C'est de l'historique (Dette)
-                if (slotTime < todayTime) {
-                    const d = new Date(slotTime);
-                    const dStr = d.toISOString().split('T')[0];
-                    const mStr = dStr.substring(0, 7);
-                    
-                    // On ajoute une charge "Retard"
-                    addToStats(mStr, tech, 0, 0, 0, 1.0); // 1h de retard
-                    
-                    events.push({
-                        date: dStr, tech, client: clientName,
-                        type: "Non traité (Historique)", duration: 1.0, status: "Non traité", color: "slate",
-                        raw_besoin: 0, raw_capacite: 0, raw_besoin_encours: 0, raw_besoin_retard: 1.0
-                    });
-                } 
-                // Si le slot est FUTUR (ou Aujourd'hui) -> C'est la charge active
-                else {
-                    const d = new Date(slotTime);
-                    const dStr = d.toISOString().split('T')[0];
-                    const mStr = dStr.substring(0, 7);
-                    
-                    addToStats(mStr, tech, 0, 1.0, 0, 0); // 1h de charge active
-                    
-                    events.push({
-                        date: dStr, tech, client: clientName,
-                        type: "Analyse (En cours)", duration: 1.0, status: "Auto (Prochain BO)", color: "amber",
-                        raw_besoin: 0, raw_capacite: 0, raw_besoin_encours: 1.0, raw_besoin_retard: 0
-                    });
-                    
-                    futureSlotFound = true; 
-                }
-            });
+            // Classification : Est-ce du passé (Retard) ou du futur (En cours) ?
+            if (targetDate.getTime() < todayTime) {
+                isHistory = true; // C'est du passé -> Historique
+            }
 
-            // FALLBACK : Si rien trouvé dans le futur
-            if (!futureSlotFound) {
-                const targetDate = new Date(today);
-                targetDate.setDate(today.getDate() + 7);
-                const dStr = targetDate.toISOString().split('T')[0];
-                const mStr = dStr.substring(0, 7);
-                
-                addToStats(mStr, tech, 0, 1.0, 0, 0);
+            const dStr = targetDate.toISOString().split('T')[0];
+            const mStr = dStr.substring(0, 7);
+
+            if (isHistory) {
+                // HISTORIQUE (Gris)
+                addToStats(mStr, tech, 0, 0, 0, 1.0); 
                 events.push({
                     date: dStr, tech, client: clientName,
-                    type: "Analyse (En cours)", duration: 1.0, status: "En attente (Pas de BO dispo)", color: "slate",
+                    type: "Non traité (Historique)", duration: 1.0, status: "Non traité", color: "slate",
+                    raw_besoin: 0, raw_capacite: 0, raw_besoin_encours: 0, raw_besoin_retard: 1.0
+                });
+            } else {
+                // FUTUR / AUJOURD'HUI (Orange)
+                addToStats(mStr, tech, 0, 1.0, 0, 0); 
+                events.push({
+                    date: dStr, tech, client: clientName,
+                    type: "Analyse (En cours)", duration: 1.0, status: "Auto (Prochain BO)", color: "amber",
                     raw_besoin: 0, raw_capacite: 0, raw_besoin_encours: 1.0, raw_besoin_retard: 0
                 });
             }
