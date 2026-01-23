@@ -55,6 +55,19 @@ const getCurrentMonthKey = () => {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
 
+const parseDateSafe = (dateStr) => {
+    if (!dateStr) return null;
+    let cleanStr = dateStr;
+    if (cleanStr.includes('/')) {
+        const parts = cleanStr.split(' ')[0].split('/'); // Gère "DD/MM/YYYY HH:mm"
+        if (parts.length === 3) cleanStr = `${parts[2]}-${parts[1]}-${parts[0]}`;
+    } else if (cleanStr.includes('T')) {
+        cleanStr = cleanStr.split('T')[0];
+    }
+    const date = new Date(cleanStr);
+    return isNaN(date.getTime()) ? null : date;
+};
+
 // --- COMPOSANTS UI ---
 
 const KPICard = ({ title, value, subtext, icon: Icon, colorClass, active, onClick }) => (
@@ -96,11 +109,8 @@ const SortableHeader = ({ label, sortKey, currentSort, onSort, align = 'left' })
   );
 };
 
-// --- NOUVEAU COMPOSANT : PROGRESS BAR PIPE ---
 const PipeProgress = ({ label, count, colorClass, barColor }) => {
-    // Calcul arbitraire du pourcentage (Max 15 dossiers = 100%)
     const percentage = Math.min((count / 15) * 100, 100);
-    
     return (
         <div className="flex flex-col w-full">
             <div className="flex justify-between items-end mb-1">
@@ -108,10 +118,7 @@ const PipeProgress = ({ label, count, colorClass, barColor }) => {
                 <span className={`text-sm font-bold ${colorClass}`}>{count}</span>
             </div>
             <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                <div 
-                    className={`h-full rounded-full transition-all duration-500 ease-out ${barColor}`} 
-                    style={{ width: `${percentage}%` }} 
-                />
+                <div className={`h-full rounded-full transition-all duration-500 ease-out ${barColor}`} style={{ width: `${percentage}%` }} />
             </div>
         </div>
     );
@@ -125,17 +132,14 @@ function MigrationDashboard() {
   const [techList, setTechList] = useState(TECH_LIST_DEFAULT);
   const [isLoading, setIsLoading] = useState(true);
   
-  // Navigation & Filtres
   const [selectedTech, setSelectedTech] = useState('Tous');
   const [selectedMonth, setSelectedMonth] = useState(null);
   const [showPlanning, setShowPlanning] = useState(false); 
 
-  // Accordeons (États d'affichage)
   const [isDetailListExpanded, setIsDetailListExpanded] = useState(true);
   const [isTableExpanded, setIsTableExpanded] = useState(false); 
   const [isTechChartExpanded, setIsTechChartExpanded] = useState(false); 
 
-  // Tri
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
 
   const { getToken } = useAuth(); 
@@ -195,7 +199,7 @@ function MigrationDashboard() {
       Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
 
       const typeEvent = cleanRow['EVENEMENT'];
-      const dateEvent = cleanRow['DATE'];
+      const dateStr = cleanRow['DATE'];
       const resp = cleanRow['RESPONSABLE'];
       const duree = cleanRow['DUREE_HRS'];
       const dossier = cleanRow['DOSSIER'] || cleanRow['LIBELLE'] || 'Client Inconnu';
@@ -203,14 +207,11 @@ function MigrationDashboard() {
 
       if (!typeEvent || !['Avocatmail - Analyse', 'Migration messagerie Adwin', 'Tache de backoffice Avocatmail'].includes(typeEvent)) return;
       
-      let dateStr = dateEvent; 
-      if (!dateStr) return;
-      if (dateStr.includes('/')) {
-         const parts = dateStr.split(' ')[0].split('/');
-         if (parts.length === 3) dateStr = `${parts[2]}-${parts[1]}-${parts[0]}`; 
-      } else if (dateStr.includes('T')) dateStr = dateStr.split('T')[0]; 
+      const dateEvent = parseDateSafe(dateStr);
+      if (!dateEvent) return;
       
-      const month = dateStr.substring(0, 7);
+      const dateFormatted = dateEvent.toISOString().split('T')[0];
+      const month = dateFormatted.substring(0, 7);
       const tech = normalizeTechName(resp, techList);
       
       let duration = 0;
@@ -241,7 +242,7 @@ function MigrationDashboard() {
       addToStats(month, tech, besoin, 0, capacite);
 
       events.push({
-        date: dateStr,
+        date: dateFormatted,
         tech,
         client: dossier,
         type: typeEvent,
@@ -254,16 +255,18 @@ function MigrationDashboard() {
       });
     });
 
-    // 2. ENCOURS
+    // 2. ENCOURS (MODIFIÉ POUR REPORTE_LE)
     encoursData.forEach(row => {
         const cleanRow = {};
         Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
         const techNameRaw = cleanRow['RESPONSABLE'];
         const categorie = cleanRow['CATEGORIE'];
-        let lastAction = cleanRow['DERNIERE_ACTION'];
+        const lastActionStr = cleanRow['DERNIERE_ACTION'];
+        const reportDateStr = cleanRow['REPORTE_LE']; // Nouvelle Colonne
         const clientName = cleanRow['INTERLOCUTEUR'] || 'Client Inconnu';
         const tech = normalizeTechName(techNameRaw, techList);
         
+        // --- PIPES ---
         if (categorie === 'Prêt pour mise en place') {
             countReadyMiseEnPlace++;
             planningEventsList.push({
@@ -281,34 +284,42 @@ function MigrationDashboard() {
             });
         }
 
-        if (lastAction) {
-            if (lastAction.includes('/')) {
-                const parts = lastAction.split(' ')[0].split('/');
-                if (parts.length === 3) lastAction = `${parts[2]}-${parts[1]}-${parts[0]}`;
-            } else if (lastAction.includes('T')) lastAction = lastAction.split('T')[0];
-            
-            const lastDate = new Date(lastAction);
-            if (!isNaN(lastDate.getTime())) {
-                const targetDate = new Date(lastDate);
-                targetDate.setDate(targetDate.getDate() + 7);
-                const targetDateStr = targetDate.toISOString().split('T')[0];
-                const targetMonth = targetDateStr.substring(0, 7);
+        // --- CALCUL DATE CIBLE ---
+        let targetDate = null;
+        let isReported = false;
 
-                addToStats(targetMonth, tech, 0, 1.0, 0);
+        const reportDate = parseDateSafe(reportDateStr);
+        const lastActionDate = parseDateSafe(lastActionStr);
 
-                events.push({
-                    date: targetDateStr,
-                    tech,
-                    client: clientName,
-                    type: "Analyse (En cours)",
-                    duration: 1.0,
-                    status: "En attente (Encours)",
-                    color: "amber",
-                    raw_besoin: 0,
-                    raw_capacite: 0,
-                    raw_besoin_encours: 1.0
-                });
-            }
+        // RÈGLE 1 : Si reporté, on prend la date de report
+        if (reportDate) {
+            targetDate = reportDate;
+            isReported = true;
+        } 
+        // RÈGLE 2 : Sinon, Dernière action + 7 jours
+        else if (lastActionDate) {
+            targetDate = new Date(lastActionDate);
+            targetDate.setDate(targetDate.getDate() + 7);
+        }
+
+        if (targetDate) {
+            const targetDateStr = targetDate.toISOString().split('T')[0];
+            const targetMonth = targetDateStr.substring(0, 7);
+
+            addToStats(targetMonth, tech, 0, 1.0, 0);
+
+            events.push({
+                date: targetDateStr,
+                tech,
+                client: clientName,
+                type: isReported ? "Analyse (Reportée)" : "Analyse (En cours)",
+                duration: 1.0,
+                status: isReported ? "Reporté" : "En attente (Encours)",
+                color: isReported ? "red" : "amber", // Rouge si reporté, Orange si auto
+                raw_besoin: 0,
+                raw_capacite: 0,
+                raw_besoin_encours: 1.0
+            });
         }
     });
 
@@ -503,18 +514,8 @@ function MigrationDashboard() {
             className={`px-4 py-3 rounded-lg shadow-sm border flex flex-col justify-center cursor-pointer transition-all duration-200 gap-3
             ${showPlanning ? 'bg-indigo-50 border-indigo-200 ring-2 ring-indigo-100' : 'bg-white border-slate-100 hover:bg-slate-50'}`}
         >
-            <PipeProgress 
-                label="Prêt pour Mise en Place" 
-                count={planningCount} 
-                colorClass="text-indigo-600" 
-                barColor="bg-indigo-500" 
-            />
-            <PipeProgress 
-                label="Prêt pour Analyse" 
-                count={analysisPipeCount} 
-                colorClass="text-cyan-600" 
-                barColor="bg-cyan-500" 
-            />
+            <PipeProgress label="Prêt pour Mise en Place" count={planningCount} colorClass="text-indigo-600" barColor="bg-indigo-500" />
+            <PipeProgress label="Prêt pour Analyse" count={analysisPipeCount} colorClass="text-cyan-600" barColor="bg-cyan-500" />
         </div>
 
         <KPICard title="Besoin Total (h)" value={kpiStats.besoin.toFixed(0)} subtext={selectedMonth ? "Sur le mois" : "Annuel"} icon={Users} colorClass="text-slate-600" active={!!selectedMonth}/>
@@ -589,7 +590,7 @@ function MigrationDashboard() {
                     <td className="px-2 py-1 font-medium text-slate-700 whitespace-nowrap truncate max-w-[200px]" title={event.client}>{event.client}</td>
                     <td className="px-2 py-1 text-slate-500 whitespace-nowrap">{event.type}</td>
                     <td className="px-2 py-1 text-right font-medium whitespace-nowrap">{event.duration > 0 ? event.duration.toFixed(2) : '-'}</td>
-                    <td className="px-2 py-1 text-center whitespace-nowrap"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${event.color === 'cyan' ? 'bg-cyan-100 text-cyan-700' : event.color === 'purple' ? 'bg-purple-100 text-purple-700' : event.color === 'indigo' ? 'bg-indigo-100 text-indigo-700' : event.color === 'amber' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>{event.status}</span></td>
+                    <td className="px-2 py-1 text-center whitespace-nowrap"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${event.color === 'cyan' ? 'bg-cyan-100 text-cyan-700' : event.color === 'purple' ? 'bg-purple-100 text-purple-700' : event.color === 'indigo' ? 'bg-indigo-100 text-indigo-700' : event.color === 'amber' ? 'bg-amber-100 text-amber-700' : event.color === 'red' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>{event.status}</span></td>
                   </tr>
                 ))}
                 {filteredAndSortedEvents.length === 0 && (<tr><td colSpan="6" className="px-4 py-8 text-center text-slate-400 italic">Aucun événement trouvé.</td></tr>)}
