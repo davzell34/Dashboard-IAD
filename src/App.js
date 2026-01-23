@@ -50,6 +50,23 @@ const getWeekLabel = (dateStr) => {
     return `S${weekNum}`;
 };
 
+// NOUVEAU : Calcule la plage de dates (Lundi - Dimanche) pour une date donnée
+const getWeekRange = (dateStr) => {
+    const date = new Date(dateStr);
+    const day = date.getDay(); // 0 (Dim) à 6 (Sam)
+    // On cale sur le Lundi (si Dimanche (0), on recule de 6 jours, sinon on recule de day-1)
+    const diffToMonday = date.getDate() - day + (day === 0 ? -6 : 1);
+    
+    const monday = new Date(date);
+    monday.setDate(diffToMonday);
+    
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+
+    const format = (d) => d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+    return `${format(monday)} - ${format(sunday)}`;
+};
+
 const getCurrentMonthKey = () => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -59,7 +76,7 @@ const parseDateSafe = (dateStr) => {
     if (!dateStr) return null;
     let cleanStr = dateStr;
     if (cleanStr.includes('/')) {
-        const parts = cleanStr.split(' ')[0].split('/'); // Gère "DD/MM/YYYY HH:mm"
+        const parts = cleanStr.split(' ')[0].split('/'); 
         if (parts.length === 3) cleanStr = `${parts[2]}-${parts[1]}-${parts[0]}`;
     } else if (cleanStr.includes('T')) {
         cleanStr = cleanStr.split('T')[0];
@@ -255,18 +272,17 @@ function MigrationDashboard() {
       });
     });
 
-    // 2. ENCOURS (MODIFIÉ POUR REPORTE_LE)
+    // 2. ENCOURS
     encoursData.forEach(row => {
         const cleanRow = {};
         Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
         const techNameRaw = cleanRow['RESPONSABLE'];
         const categorie = cleanRow['CATEGORIE'];
         const lastActionStr = cleanRow['DERNIERE_ACTION'];
-        const reportDateStr = cleanRow['REPORTE_LE']; // Nouvelle Colonne
+        const reportDateStr = cleanRow['REPORTE_LE'];
         const clientName = cleanRow['INTERLOCUTEUR'] || 'Client Inconnu';
         const tech = normalizeTechName(techNameRaw, techList);
         
-        // --- PIPES ---
         if (categorie === 'Prêt pour mise en place') {
             countReadyMiseEnPlace++;
             planningEventsList.push({
@@ -284,20 +300,15 @@ function MigrationDashboard() {
             });
         }
 
-        // --- CALCUL DATE CIBLE ---
         let targetDate = null;
         let isReported = false;
-
         const reportDate = parseDateSafe(reportDateStr);
         const lastActionDate = parseDateSafe(lastActionStr);
 
-        // RÈGLE 1 : Si reporté, on prend la date de report
         if (reportDate) {
             targetDate = reportDate;
             isReported = true;
-        } 
-        // RÈGLE 2 : Sinon, Dernière action + 7 jours
-        else if (lastActionDate) {
+        } else if (lastActionDate) {
             targetDate = new Date(lastActionDate);
             targetDate.setDate(targetDate.getDate() + 7);
         }
@@ -315,7 +326,7 @@ function MigrationDashboard() {
                 type: isReported ? "Analyse (Reportée)" : "Analyse (En cours)",
                 duration: 1.0,
                 status: isReported ? "Reporté" : "En attente (Encours)",
-                color: isReported ? "red" : "amber", // Rouge si reporté, Orange si auto
+                color: isReported ? "red" : "amber",
                 raw_besoin: 0,
                 raw_capacite: 0,
                 raw_besoin_encours: 1.0
@@ -402,6 +413,7 @@ function MigrationDashboard() {
     return result;
   }, [detailedData, selectedTech]);
 
+  // --- AGREGATION HEBDOMADAIRE AVEC LABEL DATES ---
   const weeklyAggregatedData = useMemo(() => {
       if (!selectedMonth) return [];
       let relevantEvents = eventsData.filter(e => e.date !== "N/A" && e.date.startsWith(selectedMonth));
@@ -409,19 +421,25 @@ function MigrationDashboard() {
 
       const weekMap = new Map();
       relevantEvents.forEach(evt => {
-          const weekLabel = getWeekLabel(evt.date);
-          if (!weekMap.has(weekLabel)) weekMap.set(weekLabel, { month: weekLabel, label: weekLabel, besoin: 0, besoin_encours: 0, capacite: 0 });
-          const entry = weekMap.get(weekLabel);
+          const weekNum = getWeekLabel(evt.date); // Ex: S12
+          const weekRange = getWeekRange(evt.date); // Ex: 17/03 - 23/03
+          const label = `${weekNum} (${weekRange})`; // Ex: S12 (17/03 - 23/03)
+
+          if (!weekMap.has(weekNum)) {
+              weekMap.set(weekNum, { 
+                  month: weekNum, // Clé interne
+                  label: label,   // Label affiché
+                  weekSort: parseInt(weekNum.replace('S', '')), // Pour le tri
+                  besoin: 0, besoin_encours: 0, capacite: 0 
+              });
+          }
+          const entry = weekMap.get(weekNum);
           entry.besoin += (evt.raw_besoin || 0);
           entry.besoin_encours += (evt.raw_besoin_encours || 0);
           entry.capacite += (evt.raw_capacite || 0);
       });
 
-      return Array.from(weekMap.values()).sort((a, b) => {
-          const numA = parseInt(a.label.replace('S', ''));
-          const numB = parseInt(b.label.replace('S', ''));
-          return numA - numB;
-      });
+      return Array.from(weekMap.values()).sort((a, b) => a.weekSort - b.weekSort);
   }, [eventsData, selectedMonth, selectedTech]);
 
   const mainChartData = selectedMonth ? weeklyAggregatedData : monthlyAggregatedData;
@@ -548,9 +566,31 @@ function MigrationDashboard() {
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={mainChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }} onClick={handleChartClick}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} dy={5} tickFormatter={(val) => val.includes('-') ? formatMonthShort(val) : val} interval={0} />
+              <XAxis 
+                dataKey={selectedMonth ? "label" : "month"} // Utilise "label" (S12 (date-date)) en semaine, "month" (2025-01) en année
+                axisLine={false} 
+                tickLine={false} 
+                tick={{fill: '#64748b', fontSize: 10}} 
+                dy={5} 
+                tickFormatter={(val) => {
+                    // Si Vue Semaine (commence par S), on affiche tel quel car le label est déjà formaté
+                    if (String(val).startsWith('S')) return val;
+                    // Sinon (Vue Mois), on formate
+                    return formatMonthShort(val);
+                }}
+                interval={0} 
+              />
               <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} />
-              <Tooltip cursor={{ fill: 'rgba(0,0,0,0.05)' }} contentStyle={{borderRadius: '6px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px', padding: '8px'}} labelFormatter={(val) => val.includes('-') ? formatMonth(val) : `Semaine ${val.replace('S','')}`} formatter={(value, name) => [`${parseFloat(value).toFixed(1)} h`, name === 'besoin' ? 'Besoin (Nouv.)' : name === 'besoin_encours' ? 'Besoin (En cours)' : name === 'capacite' ? 'Capacité' : name]} />
+              <Tooltip 
+                cursor={{ fill: 'rgba(0,0,0,0.05)' }} 
+                contentStyle={{borderRadius: '6px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px', padding: '8px'}} 
+                // Pour le header du tooltip, on affiche le label complet (Semaine + Date) ou le Mois
+                labelFormatter={(val) => {
+                    if (String(val).startsWith('S')) return val; // Affiche "S12 (17/03 - 23/03)"
+                    return formatMonth(val); // Affiche "Janvier 2025"
+                }}
+                formatter={(value, name) => [`${parseFloat(value).toFixed(1)} h`, name === 'besoin' ? 'Besoin (Nouv.)' : name === 'besoin_encours' ? 'Besoin (En cours)' : name === 'capacite' ? 'Capacité' : name]} 
+              />
               <Bar stackId="a" dataKey="besoin" fill="#06b6d4" radius={[0, 0, 0, 0]} barSize={selectedMonth ? 30 : 16} />
               <Bar stackId="a" dataKey="besoin_encours" fill="#f59e0b" radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
               <Bar stackId="b" dataKey="capacite" fill="#a855f7" radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
