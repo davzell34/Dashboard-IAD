@@ -11,7 +11,15 @@ import {
 import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
 
 // --- CONFIGURATION ---
-const TECH_LIST_DEFAULT = ["Jean-Philippe SAUROIS", "Jean-michel MESSIN", "Mathieu GROSSI", "Roderick GAMONDES", "Zakaria AYAT"];
+// Liste STRICTE des techniciens autorisés
+const TECH_LIST_DEFAULT = [
+    "Zakaria AYAT", 
+    "Jean-michel MESSIN", 
+    "Mathieu GROSSI", 
+    "Jean-Philippe SAUROIS", 
+    "Roderick GAMONDES"
+];
+
 const clerkPubKey = process.env.REACT_APP_CLERK_PUBLISHABLE_KEY;
 
 // --- UTILITAIRES ---
@@ -20,11 +28,18 @@ const normalizeTechName = (name, techList) => {
   if (!name || typeof name !== 'string') return "Inconnu";
   const cleanName = name.trim();
   const upperName = cleanName.toUpperCase();
+  
   for (const tech of techList) {
+    // 1. Correspondance exacte
     if (tech.toUpperCase() === upperName) return tech;
+    // 2. Correspondance sur le nom de famille (Dernier mot)
     const lastName = tech.split(' ').pop().toUpperCase();
+    // On s'assure que le nom de famille est bien dans la chaine (ex: "GAMONDES" dans "Rodercik GAMONDES")
     if (upperName.includes(lastName)) return tech;
   }
+  
+  // Si aucune correspondance dans la liste officielle, on renvoie le nom brut
+  // (Il sera filtré plus tard dans la boucle principale)
   return cleanName;
 };
 
@@ -223,6 +238,10 @@ function MigrationDashboard() {
 
         if (!dateStr || !resp) return;
         const tech = normalizeTechName(resp, techList);
+
+        // --- FILTRE STRICT : On ignore si ce n'est pas un tech de la liste ---
+        if (!techList.includes(tech)) return; 
+
         const dateEvent = parseDateSafe(dateStr);
         if(!dateEvent) return;
         
@@ -251,7 +270,7 @@ function MigrationDashboard() {
     let countReadyMiseEnPlace = 0;
     let countReadyAnalyse = 0; 
 
-    // Helper pour ajouter aux stats. Nouvel argument: besoin_retard (histo)
+    // Helper pour ajouter aux stats.
     const addToStats = (month, tech, besoin, besoin_encours, capacite, besoin_retard = 0) => {
         monthsSet.add(month);
         const key = `${month}_${tech}`;
@@ -280,12 +299,16 @@ function MigrationDashboard() {
 
       if (!typeEvent || !['Avocatmail - Analyse', 'Migration messagerie Adwin', 'Tache de backoffice Avocatmail'].includes(typeEvent)) return;
       
+      const tech = normalizeTechName(resp, techList);
+      
+      // --- FILTRE STRICT ---
+      if (!techList.includes(tech)) return;
+
       const dateEvent = parseDateSafe(dateStr);
       if (!dateEvent) return;
       
       const dateFormatted = dateEvent.toISOString().split('T')[0];
       const month = dateFormatted.substring(0, 7);
-      const tech = normalizeTechName(resp, techList);
       const duration = calculateDuration(duree);
 
       let besoin = 0; let capacite = 0; let color = 'gray'; let status = '';
@@ -340,6 +363,9 @@ function MigrationDashboard() {
         const clientName = cleanRow['INTERLOCUTEUR'] || 'Client Inconnu';
         const tech = normalizeTechName(techNameRaw, techList);
         
+        // --- FILTRE STRICT ---
+        if (!techList.includes(tech)) return;
+
         if (categorie === 'Prêt pour mise en place') {
             countReadyMiseEnPlace++;
             planningEventsList.push({
@@ -376,14 +402,13 @@ function MigrationDashboard() {
             const techSlots = techBackofficeSchedule[tech] || [];
             
             // Déterminer la date de début de "l'existence" de ce ticket pour la prod
-            // Si pas de dernière action, on ne peut pas historiser, on met juste au futur
             const startHistoryTime = lastActionDate ? lastActionDate.getTime() : todayTime;
 
             let futureSlotFound = false;
 
             // ON PARCOURT TOUS LES SLOTS DU TECH (Passés et Futurs)
             techSlots.forEach(slotTime => {
-                if (futureSlotFound) return; // On a déjà trouvé le slot futur, on arrête (le ticket n'est pas dupliqué dans le futur)
+                if (futureSlotFound) return; 
 
                 // Si le slot est avant la création/action du ticket, il n'est pas concerné
                 if (slotTime < startHistoryTime) return;
@@ -417,11 +442,11 @@ function MigrationDashboard() {
                         raw_besoin: 0, raw_capacite: 0, raw_besoin_encours: 1.0, raw_besoin_retard: 0
                     });
                     
-                    futureSlotFound = true; // On a placé le ticket, on arrête la boucle
+                    futureSlotFound = true; 
                 }
             });
 
-            // FALLBACK : Si on a parcouru tous les slots et rien trouvé dans le futur
+            // FALLBACK : Si rien trouvé dans le futur
             if (!futureSlotFound) {
                 const targetDate = new Date(today);
                 targetDate.setDate(today.getDate() + 7);
@@ -510,7 +535,6 @@ function MigrationDashboard() {
     while (currentY < endYear || (currentY === endYear && currentM <= endMonth)) {
         const mStr = `${currentY}-${String(currentM).padStart(2, '0')}`;
         const data = aggMap.get(mStr) || { month: mStr, label: formatMonthShort(mStr), besoin: 0, besoin_encours: 0, besoin_retard: 0, capacite: 0 };
-        // Le besoin total inclut le retard (historique) + le besoin courant + le besoin encours
         const totalBesoinMois = data.besoin + data.besoin_encours + data.besoin_retard;
         result.push({
             ...data,
@@ -575,8 +599,6 @@ function MigrationDashboard() {
 
   const kpiStats = useMemo(() => {
     if (mainChartData.length === 0) return { besoin: 0, capacite: 0, ratio: 0 };
-    // Attention : pour le KPI "Besoin Total", on ne compte généralement que le travail à faire (Futur)
-    // Si on inclut l'historique, le chiffre sera énorme. Ici je compte TOUT (y compris historique) car c'est la vue "Charge".
     const totalBesoin = mainChartData.reduce((acc, curr) => acc + (curr.totalBesoinMois || (curr.besoin + curr.besoin_encours + curr.besoin_retard)), 0);
     const totalCapacite = mainChartData.reduce((acc, curr) => acc + curr.capacite, 0);
     const ratio = totalBesoin > 0 ? (totalCapacite / totalBesoin) * 100 : 0;
@@ -706,8 +728,7 @@ function MigrationDashboard() {
                 formatter={(value, name) => [`${parseFloat(value).toFixed(1)} h`, name === 'besoin' ? 'Besoin (Nouv.)' : name === 'besoin_encours' ? 'Besoin (En cours)' : name === 'besoin_retard' ? 'Historique (Non traité)' : name === 'capacite' ? 'Capacité' : name]} 
               />
               
-              {/* ORDRE DES BARRES EMPILÉES : Histo > Besoin > Encours */}
-              <Bar stackId="a" dataKey="besoin_retard" fill="#94a3b8" radius={[0, 0, 0, 0]} barSize={selectedMonth ? 30 : 16} /> {/* Slate-400 */}
+              <Bar stackId="a" dataKey="besoin_retard" fill="#94a3b8" radius={[0, 0, 0, 0]} barSize={selectedMonth ? 30 : 16} />
               <Bar stackId="a" dataKey="besoin" fill="#06b6d4" radius={[0, 0, 0, 0]} barSize={selectedMonth ? 30 : 16} />
               <Bar stackId="a" dataKey="besoin_encours" fill="#f59e0b" radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
               
