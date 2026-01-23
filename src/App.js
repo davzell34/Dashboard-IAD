@@ -31,15 +31,14 @@ const normalizeTechName = (name, techList) => {
 const formatMonth = (dateStr) => {
   if (!dateStr) return '';
   const [year, month] = dateStr.split('-');
-  // Crée une date locale pour l'affichage (1er du mois à midi pour éviter les pbs de fuseau)
-  const date = new Date(parseInt(year), parseInt(month) - 1, 1, 12, 0, 0);
+  const date = new Date(parseInt(year), parseInt(month) - 1, 1);
   return date.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
 };
 
 const formatMonthShort = (dateStr) => {
     if (!dateStr) return '';
     const [year, month] = dateStr.split('-');
-    const date = new Date(parseInt(year), parseInt(month) - 1, 1, 12, 0, 0);
+    const date = new Date(parseInt(year), parseInt(month) - 1, 1);
     return date.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
 };
 
@@ -84,7 +83,6 @@ const parseDateSafe = (dateStr) => {
     return isNaN(date.getTime()) ? null : date;
 };
 
-// Fonction helper pour calculer la durée
 const calculateDuration = (duree) => {
     if (typeof duree === 'number') return duree;
     if (duree && typeof duree === 'string') {
@@ -209,33 +207,45 @@ function MigrationDashboard() {
     const monthsSet = new Set(); 
 
     const deductionsMap = new Map();
+    
+    // --- 1. INDEXATION DES CRENEAUX BACKOFFICE ---
+    const techBackofficeSchedule = {}; 
 
-    // 0. PRE-CALCUL DES DEDUCTIONS
     backofficeData.forEach(row => {
         const cleanRow = {};
         Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
         
         const typeEvent = cleanRow['EVENEMENT'];
-        if (typeEvent === 'Tache de backoffice Avocatmail') return; 
-        
         const dateStr = cleanRow['DATE'];
         const timeStr = cleanRow['HEURE'];
         const resp = cleanRow['RESPONSABLE'];
         const duree = cleanRow['DUREE_HRS'];
 
-        if (!dateStr || !timeStr || !resp) return;
-
+        if (!dateStr || !resp) return;
+        const tech = normalizeTechName(resp, techList);
         const dateEvent = parseDateSafe(dateStr);
         if(!dateEvent) return;
+        
         const dateKey = dateEvent.toISOString().split('T')[0];
-        const tech = normalizeTechName(resp, techList);
-        const duration = calculateDuration(duree);
+        
+        // A. Indexation des créneaux
+        if (typeEvent === 'Tache de backoffice Avocatmail') {
+            if (!techBackofficeSchedule[tech]) techBackofficeSchedule[tech] = [];
+            techBackofficeSchedule[tech].push(dateEvent.getTime()); 
+        }
+        
+        // B. Calcul des Déductions
+        if (typeEvent !== 'Tache de backoffice Avocatmail' && timeStr) {
+            const timeKey = timeStr.substring(0, 5); 
+            const key = `${dateKey}_${timeKey}_${tech}`;
+            const duration = calculateDuration(duree);
+            const currentDeduction = deductionsMap.get(key) || 0;
+            deductionsMap.set(key, currentDeduction + duration);
+        }
+    });
 
-        const timeKey = timeStr.substring(0, 5); 
-        const key = `${dateKey}_${timeKey}_${tech}`;
-
-        const currentDeduction = deductionsMap.get(key) || 0;
-        deductionsMap.set(key, currentDeduction + duration);
+    Object.keys(techBackofficeSchedule).forEach(t => {
+        techBackofficeSchedule[t].sort((a, b) => a - b);
     });
 
     let countReadyMiseEnPlace = 0;
@@ -253,7 +263,7 @@ function MigrationDashboard() {
         entry.capacite += capacite;
     };
 
-    // 1. BACKOFFICE (AVEC APPLICATION DES DEDUCTIONS)
+    // 2. BACKOFFICE (TRAITEMENT PRINCIPAL)
     backofficeData.forEach(row => {
       const cleanRow = {};
       Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
@@ -310,13 +320,19 @@ function MigrationDashboard() {
       });
     });
 
-    // 2. ENCOURS
+    // 3. ENCOURS (LOGIQUE GLISSANTE)
+    
+    // Définition de "Aujourd'hui" (Minuit) pour la comparaison
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayTime = today.getTime();
+
     encoursData.forEach(row => {
         const cleanRow = {};
         Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
         const techNameRaw = cleanRow['RESPONSABLE'];
         const categorie = cleanRow['CATEGORIE'];
-        const lastActionStr = cleanRow['DERNIERE_ACTION'];
+        // const lastActionStr = cleanRow['DERNIERE_ACTION']; // Plus utilisé pour le calcul de date cible si auto
         const reportDateStr = cleanRow['REPORTE_LE'];
         const clientName = cleanRow['INTERLOCUTEUR'] || 'Client Inconnu';
         const tech = normalizeTechName(techNameRaw, techList);
@@ -339,22 +355,46 @@ function MigrationDashboard() {
         }
 
         let targetDate = null;
+        let status = "";
+        let color = "";
         let isReported = false;
-        const reportDate = parseDateSafe(reportDateStr);
-        const lastActionDate = parseDateSafe(lastActionStr);
 
+        const reportDate = parseDateSafe(reportDateStr);
+
+        // CAS 1 : DATE DE REPORT FORCÉE (Priorité Absolue)
         if (reportDate) {
             targetDate = reportDate;
+            status = "Reporté";
+            color = "red";
             isReported = true;
-        } else if (lastActionDate) {
-            targetDate = new Date(lastActionDate);
-            targetDate.setDate(targetDate.getDate() + 7);
+        } 
+        // CAS 2 : PLANIFICATION AUTOMATIQUE GLISSANTE
+        else {
+            // On cherche le prochain créneau BO pour CE technicien A PARTIR D'AUJOURD'HUI
+            // Peu importe quand était la dernière action, le travail est à faire dans le futur.
+            const techSlots = techBackofficeSchedule[tech] || [];
+            
+            // Trouver le premier slot >= Aujourd'hui
+            const nextSlotTime = techSlots.find(t => t >= todayTime);
+
+            if (nextSlotTime) {
+                targetDate = new Date(nextSlotTime);
+                status = "Auto (Prochain BO)";
+                color = "amber"; // Orange : Planifié automatiquement
+            } else {
+                // FALLBACK : Si pas de créneau futur (ou technicien inconnu), on met à J+7
+                targetDate = new Date(today);
+                targetDate.setDate(today.getDate() + 7);
+                status = "En attente (Pas de BO dispo)";
+                color = "slate"; // Gris : Pas de créneau trouvé
+            }
         }
 
         if (targetDate) {
             const targetDateStr = targetDate.toISOString().split('T')[0];
             const targetMonth = targetDateStr.substring(0, 7);
 
+            // On réserve 1h de charge
             addToStats(targetMonth, tech, 0, 1.0, 0);
 
             events.push({
@@ -363,8 +403,8 @@ function MigrationDashboard() {
                 client: clientName,
                 type: isReported ? "Analyse (Reportée)" : "Analyse (En cours)",
                 duration: 1.0,
-                status: isReported ? "Reporté" : "En attente (Encours)",
-                color: isReported ? "red" : "amber",
+                status: status,
+                color: color,
                 raw_besoin: 0,
                 raw_capacite: 0,
                 raw_besoin_encours: 1.0
@@ -434,7 +474,6 @@ function MigrationDashboard() {
     const allMonthsKeys = Array.from(aggMap.keys()).sort();
     if(allMonthsKeys.length === 0) return [];
 
-    // On utilise les clés "YYYY-MM" pour itérer mathématiquement et éviter les bugs de Date()
     const [startYear, startMonth] = allMonthsKeys[0].split('-').map(Number);
     const [endYear, endMonth] = allMonthsKeys[allMonthsKeys.length - 1].split('-').map(Number);
     
@@ -442,21 +481,15 @@ function MigrationDashboard() {
     let currentY = startYear;
     let currentM = startMonth;
 
-    // Boucle tant qu'on n'a pas dépassé la date de fin
     while (currentY < endYear || (currentY === endYear && currentM <= endMonth)) {
         const mStr = `${currentY}-${String(currentM).padStart(2, '0')}`;
-        
-        // Récupération sécurisée des données
         const data = aggMap.get(mStr) || { month: mStr, label: formatMonthShort(mStr), besoin: 0, besoin_encours: 0, capacite: 0 };
-        
         const totalBesoinMois = data.besoin + data.besoin_encours;
         result.push({
             ...data,
             totalBesoinMois,
             soldeMensuel: data.capacite - totalBesoinMois
         });
-
-        // Incrément
         currentM++;
         if (currentM > 12) {
             currentM = 1;
