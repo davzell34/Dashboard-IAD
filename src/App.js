@@ -31,14 +31,15 @@ const normalizeTechName = (name, techList) => {
 const formatMonth = (dateStr) => {
   if (!dateStr) return '';
   const [year, month] = dateStr.split('-');
-  const date = new Date(parseInt(year), parseInt(month) - 1, 1);
+  // Crée une date locale pour l'affichage (1er du mois à midi pour éviter les pbs de fuseau)
+  const date = new Date(parseInt(year), parseInt(month) - 1, 1, 12, 0, 0);
   return date.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
 };
 
 const formatMonthShort = (dateStr) => {
     if (!dateStr) return '';
     const [year, month] = dateStr.split('-');
-    const date = new Date(parseInt(year), parseInt(month) - 1, 1);
+    const date = new Date(parseInt(year), parseInt(month) - 1, 1, 12, 0, 0);
     return date.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
 };
 
@@ -207,17 +208,14 @@ function MigrationDashboard() {
     const monthlyStats = new Map();
     const monthsSet = new Set(); 
 
-    // Map pour stocker les déductions : "DATE_HEURE_TECH" -> Durée à soustraire
     const deductionsMap = new Map();
 
-    // 0. PRE-CALCUL DES DEDUCTIONS (COLLISIONS)
+    // 0. PRE-CALCUL DES DEDUCTIONS
     backofficeData.forEach(row => {
         const cleanRow = {};
         Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
         
         const typeEvent = cleanRow['EVENEMENT'];
-        // On ne s'intéresse qu'aux événements qui NE SONT PAS des taches de backoffice
-        // car ce sont eux qui viennent "manger" la capacité
         if (typeEvent === 'Tache de backoffice Avocatmail') return; 
         
         const dateStr = cleanRow['DATE'];
@@ -227,15 +225,12 @@ function MigrationDashboard() {
 
         if (!dateStr || !timeStr || !resp) return;
 
-        // Normalisation
         const dateEvent = parseDateSafe(dateStr);
         if(!dateEvent) return;
         const dateKey = dateEvent.toISOString().split('T')[0];
         const tech = normalizeTechName(resp, techList);
         const duration = calculateDuration(duree);
 
-        // Clé unique de collision : Date + Heure + Tech
-        // On nettoie l'heure pour être sûr (ex: "14:00:00" -> "14:00")
         const timeKey = timeStr.substring(0, 5); 
         const key = `${dateKey}_${timeKey}_${tech}`;
 
@@ -243,7 +238,6 @@ function MigrationDashboard() {
         deductionsMap.set(key, currentDeduction + duration);
     });
 
-    // ... Suite du traitement classique ...
     let countReadyMiseEnPlace = 0;
     let countReadyAnalyse = 0; 
 
@@ -285,22 +279,13 @@ function MigrationDashboard() {
       let besoin = 0; let capacite = 0; let color = 'gray'; let status = '';
 
       if (typeEvent === 'Tache de backoffice Avocatmail') {
-        // --- LOGIQUE DE DEDUCTION ICI ---
         const timeKey = timeStr ? timeStr.substring(0, 5) : '';
         const key = `${dateFormatted}_${timeKey}_${tech}`;
         const deduction = deductionsMap.get(key) || 0;
         
-        // La capacité est réduite par les événements concurrents (minimum 0)
         capacite = Math.max(0, duration - deduction);
         color = 'purple';
         status = 'Production (Backoffice)';
-        
-        // Si la capacité a été réduite, on peut ajouter une info visuelle ou logguer
-        if (deduction > 0 && capacite < duration) {
-            // Optionnel : on pourrait changer le statut ou la couleur pour indiquer un conflit/réservation
-            // status += ' (Réservé)';
-        }
-
       } else {
         const users = parseInt(nbUsers, 10);
         besoin = 1.0;
@@ -316,7 +301,7 @@ function MigrationDashboard() {
         tech,
         client: dossier,
         type: typeEvent,
-        duration: Math.max(besoin, capacite), // Pour l'affichage liste, on montre le max (la capa restante ou le besoin)
+        duration: Math.max(besoin, capacite), 
         status,
         color,
         raw_besoin: besoin,
@@ -432,6 +417,7 @@ function MigrationDashboard() {
     return events;
   }, [selectedTech, selectedMonth, showPlanning, eventsData, sortConfig]);
 
+  // --- CORRECTION : AGREGATION MENSUELLE PAR BOUCLE MATHÉMATIQUE ---
   const monthlyAggregatedData = useMemo(() => {
     if (detailedData.length === 0) return [];
     
@@ -445,23 +431,37 @@ function MigrationDashboard() {
       entry.capacite += item.capacite;
     });
 
-    const allMonths = Array.from(aggMap.keys()).sort();
-    if(allMonths.length === 0) return [];
+    const allMonthsKeys = Array.from(aggMap.keys()).sort();
+    if(allMonthsKeys.length === 0) return [];
 
-    let current = new Date(allMonths[0] + '-01');
-    const end = new Date(allMonths[allMonths.length - 1] + '-01');
+    // On utilise les clés "YYYY-MM" pour itérer mathématiquement et éviter les bugs de Date()
+    const [startYear, startMonth] = allMonthsKeys[0].split('-').map(Number);
+    const [endYear, endMonth] = allMonthsKeys[allMonthsKeys.length - 1].split('-').map(Number);
     
     const result = [];
-    while (current <= end) {
-        const mStr = current.toISOString().substring(0, 7);
+    let currentY = startYear;
+    let currentM = startMonth;
+
+    // Boucle tant qu'on n'a pas dépassé la date de fin
+    while (currentY < endYear || (currentY === endYear && currentM <= endMonth)) {
+        const mStr = `${currentY}-${String(currentM).padStart(2, '0')}`;
+        
+        // Récupération sécurisée des données
         const data = aggMap.get(mStr) || { month: mStr, label: formatMonthShort(mStr), besoin: 0, besoin_encours: 0, capacite: 0 };
+        
         const totalBesoinMois = data.besoin + data.besoin_encours;
         result.push({
             ...data,
             totalBesoinMois,
             soldeMensuel: data.capacite - totalBesoinMois
         });
-        current.setMonth(current.getMonth() + 1);
+
+        // Incrément
+        currentM++;
+        if (currentM > 12) {
+            currentM = 1;
+            currentY++;
+        }
     }
     return result;
   }, [detailedData, selectedTech]);
