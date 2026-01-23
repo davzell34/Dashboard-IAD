@@ -50,11 +50,9 @@ const getWeekLabel = (dateStr) => {
     return `S${weekNum}`;
 };
 
-// NOUVEAU : Calcule la plage de dates (Lundi - Dimanche) pour une date donnée
 const getWeekRange = (dateStr) => {
     const date = new Date(dateStr);
-    const day = date.getDay(); // 0 (Dim) à 6 (Sam)
-    // On cale sur le Lundi (si Dimanche (0), on recule de 6 jours, sinon on recule de day-1)
+    const day = date.getDay(); 
     const diffToMonday = date.getDate() - day + (day === 0 ? -6 : 1);
     
     const monday = new Date(date);
@@ -83,6 +81,20 @@ const parseDateSafe = (dateStr) => {
     }
     const date = new Date(cleanStr);
     return isNaN(date.getTime()) ? null : date;
+};
+
+// Fonction helper pour calculer la durée
+const calculateDuration = (duree) => {
+    if (typeof duree === 'number') return duree;
+    if (duree && typeof duree === 'string') {
+        if (duree.includes(':')) {
+          const [h, m] = duree.split(':').map(Number);
+          return (h || 0) + (m || 0)/60;
+        } else {
+          return parseFloat(duree.replace(',', '.')) || 0;
+        }
+    }
+    return 0;
 };
 
 // --- COMPOSANTS UI ---
@@ -195,6 +207,43 @@ function MigrationDashboard() {
     const monthlyStats = new Map();
     const monthsSet = new Set(); 
 
+    // Map pour stocker les déductions : "DATE_HEURE_TECH" -> Durée à soustraire
+    const deductionsMap = new Map();
+
+    // 0. PRE-CALCUL DES DEDUCTIONS (COLLISIONS)
+    backofficeData.forEach(row => {
+        const cleanRow = {};
+        Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
+        
+        const typeEvent = cleanRow['EVENEMENT'];
+        // On ne s'intéresse qu'aux événements qui NE SONT PAS des taches de backoffice
+        // car ce sont eux qui viennent "manger" la capacité
+        if (typeEvent === 'Tache de backoffice Avocatmail') return; 
+        
+        const dateStr = cleanRow['DATE'];
+        const timeStr = cleanRow['HEURE'];
+        const resp = cleanRow['RESPONSABLE'];
+        const duree = cleanRow['DUREE_HRS'];
+
+        if (!dateStr || !timeStr || !resp) return;
+
+        // Normalisation
+        const dateEvent = parseDateSafe(dateStr);
+        if(!dateEvent) return;
+        const dateKey = dateEvent.toISOString().split('T')[0];
+        const tech = normalizeTechName(resp, techList);
+        const duration = calculateDuration(duree);
+
+        // Clé unique de collision : Date + Heure + Tech
+        // On nettoie l'heure pour être sûr (ex: "14:00:00" -> "14:00")
+        const timeKey = timeStr.substring(0, 5); 
+        const key = `${dateKey}_${timeKey}_${tech}`;
+
+        const currentDeduction = deductionsMap.get(key) || 0;
+        deductionsMap.set(key, currentDeduction + duration);
+    });
+
+    // ... Suite du traitement classique ...
     let countReadyMiseEnPlace = 0;
     let countReadyAnalyse = 0; 
 
@@ -210,13 +259,14 @@ function MigrationDashboard() {
         entry.capacite += capacite;
     };
 
-    // 1. BACKOFFICE
+    // 1. BACKOFFICE (AVEC APPLICATION DES DEDUCTIONS)
     backofficeData.forEach(row => {
       const cleanRow = {};
       Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
 
       const typeEvent = cleanRow['EVENEMENT'];
       const dateStr = cleanRow['DATE'];
+      const timeStr = cleanRow['HEURE'];
       const resp = cleanRow['RESPONSABLE'];
       const duree = cleanRow['DUREE_HRS'];
       const dossier = cleanRow['DOSSIER'] || cleanRow['LIBELLE'] || 'Client Inconnu';
@@ -230,24 +280,27 @@ function MigrationDashboard() {
       const dateFormatted = dateEvent.toISOString().split('T')[0];
       const month = dateFormatted.substring(0, 7);
       const tech = normalizeTechName(resp, techList);
-      
-      let duration = 0;
-      if (typeof duree === 'number') duration = duree;
-      else if (duree && typeof duree === 'string') {
-          if (duree.includes(':')) {
-            const [h, m] = duree.split(':').map(Number);
-            duration = (h || 0) + (m || 0)/60;
-          } else {
-            duration = parseFloat(duree.replace(',', '.')) || 0;
-          }
-      }
+      const duration = calculateDuration(duree);
 
       let besoin = 0; let capacite = 0; let color = 'gray'; let status = '';
 
       if (typeEvent === 'Tache de backoffice Avocatmail') {
-        capacite = duration;
+        // --- LOGIQUE DE DEDUCTION ICI ---
+        const timeKey = timeStr ? timeStr.substring(0, 5) : '';
+        const key = `${dateFormatted}_${timeKey}_${tech}`;
+        const deduction = deductionsMap.get(key) || 0;
+        
+        // La capacité est réduite par les événements concurrents (minimum 0)
+        capacite = Math.max(0, duration - deduction);
         color = 'purple';
         status = 'Production (Backoffice)';
+        
+        // Si la capacité a été réduite, on peut ajouter une info visuelle ou logguer
+        if (deduction > 0 && capacite < duration) {
+            // Optionnel : on pourrait changer le statut ou la couleur pour indiquer un conflit/réservation
+            // status += ' (Réservé)';
+        }
+
       } else {
         const users = parseInt(nbUsers, 10);
         besoin = 1.0;
@@ -263,7 +316,7 @@ function MigrationDashboard() {
         tech,
         client: dossier,
         type: typeEvent,
-        duration: Math.max(besoin, capacite),
+        duration: Math.max(besoin, capacite), // Pour l'affichage liste, on montre le max (la capa restante ou le besoin)
         status,
         color,
         raw_besoin: besoin,
@@ -413,7 +466,6 @@ function MigrationDashboard() {
     return result;
   }, [detailedData, selectedTech]);
 
-  // --- AGREGATION HEBDOMADAIRE AVEC LABEL DATES ---
   const weeklyAggregatedData = useMemo(() => {
       if (!selectedMonth) return [];
       let relevantEvents = eventsData.filter(e => e.date !== "N/A" && e.date.startsWith(selectedMonth));
@@ -421,15 +473,15 @@ function MigrationDashboard() {
 
       const weekMap = new Map();
       relevantEvents.forEach(evt => {
-          const weekNum = getWeekLabel(evt.date); // Ex: S12
-          const weekRange = getWeekRange(evt.date); // Ex: 17/03 - 23/03
-          const label = `${weekNum} (${weekRange})`; // Ex: S12 (17/03 - 23/03)
+          const weekNum = getWeekLabel(evt.date); 
+          const weekRange = getWeekRange(evt.date); 
+          const label = `${weekNum} (${weekRange})`; 
 
           if (!weekMap.has(weekNum)) {
               weekMap.set(weekNum, { 
-                  month: weekNum, // Clé interne
-                  label: label,   // Label affiché
-                  weekSort: parseInt(weekNum.replace('S', '')), // Pour le tri
+                  month: weekNum, 
+                  label: label, 
+                  weekSort: parseInt(weekNum.replace('S', '')),
                   besoin: 0, besoin_encours: 0, capacite: 0 
               });
           }
@@ -567,15 +619,13 @@ function MigrationDashboard() {
             <ComposedChart data={mainChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }} onClick={handleChartClick}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
               <XAxis 
-                dataKey={selectedMonth ? "label" : "month"} // Utilise "label" (S12 (date-date)) en semaine, "month" (2025-01) en année
+                dataKey={selectedMonth ? "label" : "month"} 
                 axisLine={false} 
                 tickLine={false} 
                 tick={{fill: '#64748b', fontSize: 10}} 
                 dy={5} 
                 tickFormatter={(val) => {
-                    // Si Vue Semaine (commence par S), on affiche tel quel car le label est déjà formaté
                     if (String(val).startsWith('S')) return val;
-                    // Sinon (Vue Mois), on formate
                     return formatMonthShort(val);
                 }}
                 interval={0} 
@@ -584,10 +634,9 @@ function MigrationDashboard() {
               <Tooltip 
                 cursor={{ fill: 'rgba(0,0,0,0.05)' }} 
                 contentStyle={{borderRadius: '6px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px', padding: '8px'}} 
-                // Pour le header du tooltip, on affiche le label complet (Semaine + Date) ou le Mois
                 labelFormatter={(val) => {
-                    if (String(val).startsWith('S')) return val; // Affiche "S12 (17/03 - 23/03)"
-                    return formatMonth(val); // Affiche "Janvier 2025"
+                    if (String(val).startsWith('S')) return val; 
+                    return formatMonth(val);
                 }}
                 formatter={(value, name) => [`${parseFloat(value).toFixed(1)} h`, name === 'besoin' ? 'Besoin (Nouv.)' : name === 'besoin_encours' ? 'Besoin (En cours)' : name === 'capacite' ? 'Capacité' : name]} 
               />
