@@ -103,6 +103,28 @@ const calculateDuration = (duree) => {
     return 0;
 };
 
+// --- CALCUL AVANCEMENT (CORRIGÉ) ---
+const getRemainingLoad = (categorie) => {
+    if (!categorie) return 0.5; 
+
+    const cat = categorie.trim();
+    let completion = 0.5; 
+
+    if (cat.includes('Préparation tenant 365')) completion = 0.15;
+    else if (cat.includes('Attente retour client')) completion = 0.05;
+    else if (cat.includes('Attente retour presta')) completion = 0.05;
+    else if (cat.includes('Bloqué cause client/presta')) completion = 0.05;
+    else if (cat.includes('Copie en cours')) completion = 0.75;
+    else if (cat.includes('Suspendu')) completion = 0.05;
+    
+    // --- CES CATEGORIES SONT CONSIDEREES COMME TERMINEES POUR LE TECH ---
+    else if (cat.includes('Prêt pour mise en place')) completion = 1.0; // 100% Fini
+    else if (cat.includes('A planifier')) completion = 1.0; // 100% Fini (CORRIGÉ)
+    
+    // Charge Restante = 1h * (100% - Avancement)
+    return Math.max(0, 1.0 * (1 - completion));
+};
+
 // --- COMPOSANTS UI ---
 
 const KPICard = ({ title, value, subtext, icon: Icon, colorClass, active, onClick }) => (
@@ -231,7 +253,7 @@ function MigrationDashboard() {
         if (!dateStr || !resp) return;
         const tech = normalizeTechName(resp, techList);
         
-        // --- FILTRE STRICT ---
+        // FILTRE STRICT
         if (!techList.includes(tech)) return;
 
         const dateEvent = parseDateSafe(dateStr);
@@ -262,7 +284,7 @@ function MigrationDashboard() {
     let countReadyMiseEnPlace = 0;
     let countReadyAnalyse = 0; 
 
-    // Helper (Retour à la version sans "besoin_retard")
+    // Helper 
     const addToStats = (month, tech, besoin, besoin_encours, capacite) => {
         monthsSet.add(month);
         const key = `${month}_${tech}`;
@@ -334,7 +356,7 @@ function MigrationDashboard() {
       });
     });
 
-    // 3. ENCOURS (LOGIQUE GLISSANTE SIMPLE)
+    // 3. ENCOURS (LOGIQUE GLISSANTE + CHARGE PONDÉRÉE)
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const todayTime = today.getTime();
@@ -373,6 +395,13 @@ function MigrationDashboard() {
         let color = "";
         let isReported = false;
 
+        // CALCUL DE LA CHARGE RESTANTE
+        const remainingLoad = getRemainingLoad(categorie);
+
+        // Si la charge restante est 0 (ex: "A planifier" = 100% fini), 
+        // on ne l'affiche pas dans les graphiques de charge
+        if (remainingLoad <= 0) return;
+
         // CAS 1 : DATE DE REPORT FORCÉE
         if (reportDate) {
             targetDate = reportDate;
@@ -392,7 +421,7 @@ function MigrationDashboard() {
                 status = "Auto (Prochain BO)";
                 color = "amber";
             } else {
-                // FALLBACK : J+7 par défaut si pas de créneau
+                // FALLBACK
                 targetDate = new Date(today);
                 targetDate.setDate(today.getDate() + 7);
                 status = "En attente (Pas de BO dispo)";
@@ -404,19 +433,20 @@ function MigrationDashboard() {
             const targetDateStr = targetDate.toISOString().split('T')[0];
             const targetMonth = targetDateStr.substring(0, 7);
 
-            addToStats(targetMonth, tech, 0, 1.0, 0);
+            // On ajoute la charge PONDÉRÉE (ex: 0.25h)
+            addToStats(targetMonth, tech, 0, remainingLoad, 0);
 
             events.push({
                 date: targetDateStr,
                 tech,
                 client: clientName,
-                type: isReported ? "Analyse (Reportée)" : "Analyse (En cours)",
-                duration: 1.0,
+                type: `Encours (${categorie || "Non classé"})`,
+                duration: remainingLoad, // Durée affichée = Reste à faire
                 status: status,
                 color: color,
                 raw_besoin: 0,
                 raw_capacite: 0,
-                raw_besoin_encours: 1.0
+                raw_besoin_encours: remainingLoad
             });
         }
     });
