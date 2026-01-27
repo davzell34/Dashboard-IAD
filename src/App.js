@@ -1,12 +1,14 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart
+  BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  LineChart, Line, AreaChart, Area, ComposedChart, ReferenceLine, RadialBarChart, RadialBar
 } from 'recharts';
 import { 
-  Activity, Users, Clock, TrendingUp, Filter, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Loader,
-  ArrowUpDown, ArrowUp, ArrowDown, Terminal, AlertTriangle
+  Activity, Users, Clock, TrendingUp, AlertTriangle, CheckCircle, 
+  Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Loader,
+  ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout, Search, Layers, Server, FileSearch, Terminal
 } from 'lucide-react';
-import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useAuth } from "@clerk/clerk-react";
+import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
 
 // --- CONFIGURATION ---
 const TECH_LIST_DEFAULT = [
@@ -19,120 +21,185 @@ const TECH_LIST_DEFAULT = [
 
 const clerkPubKey = process.env.REACT_APP_CLERK_PUBLISHABLE_KEY;
 
-// --- UTILITAIRES ROBUSTES (ANTI-CRASH) ---
-
-const normalizeRowKeys = (row) => {
-    if (!row || typeof row !== 'object') return {};
-    const newRow = {};
-    Object.keys(row).forEach(key => {
-        if (key) newRow[key.toUpperCase().trim()] = row[key];
-    });
-    return newRow;
-};
+// --- UTILITAIRES ---
 
 const normalizeTechName = (name, techList) => {
   if (!name || typeof name !== 'string') return "Inconnu";
   const cleanName = name.trim();
   const upperName = cleanName.toUpperCase();
+  
   for (const tech of techList) {
     if (tech.toUpperCase() === upperName) return tech;
     const lastName = tech.split(' ').pop().toUpperCase();
     if (upperName.includes(lastName)) return tech;
   }
-  return "Autre";
+  return cleanName;
+};
+
+const formatMonth = (dateStr) => {
+  if (!dateStr) return '';
+  const [year, month] = dateStr.split('-');
+  const date = new Date(parseInt(year), parseInt(month) - 1, 1);
+  return date.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+};
+
+const formatMonthShort = (dateStr) => {
+    if (!dateStr) return '';
+    const [year, month] = dateStr.split('-');
+    const date = new Date(parseInt(year), parseInt(month) - 1, 1);
+    return date.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+};
+
+const getWeekLabel = (dateStr) => {
+    const date = new Date(dateStr);
+    const firstDayOfYear = new Date(date.getFullYear(), 0, 1);
+    const pastDaysOfYear = (date - firstDayOfYear) / 86400000;
+    const weekNum = Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
+    return `S${weekNum}`;
+};
+
+const getWeekRange = (dateStr) => {
+    const date = new Date(dateStr);
+    const day = date.getDay(); 
+    const diffToMonday = date.getDate() - day + (day === 0 ? -6 : 1);
+    
+    const monday = new Date(date);
+    monday.setDate(diffToMonday);
+    
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+
+    const format = (d) => d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+    return `${format(monday)} - ${format(sunday)}`;
+};
+
+const getCurrentMonthKey = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
 
 const parseDateSafe = (dateStr) => {
     if (!dateStr) return null;
-    try {
-        if (dateStr instanceof Date) return dateStr;
-        let cleanStr = String(dateStr).trim();
-        // Format DD/MM/YYYY
-        if (cleanStr.includes('/')) {
-            const parts = cleanStr.split(' ')[0].split('/'); 
-            if (parts.length === 3) return new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
-        } 
-        // Format ISO
-        if (cleanStr.includes('T')) cleanStr = cleanStr.split('T')[0];
-        
-        const d = new Date(cleanStr);
-        return isNaN(d.getTime()) ? null : d;
-    } catch (e) {
-        return null;
+    let cleanStr = dateStr;
+    if (cleanStr.includes('/')) {
+        const parts = cleanStr.split(' ')[0].split('/'); 
+        if (parts.length === 3) cleanStr = `${parts[2]}-${parts[1]}-${parts[0]}`;
+    } else if (cleanStr.includes('T')) {
+        cleanStr = cleanStr.split('T')[0];
     }
+    const date = new Date(cleanStr);
+    return isNaN(date.getTime()) ? null : date;
 };
 
 const calculateDuration = (duree) => {
-    try {
-        if (typeof duree === 'number') return duree;
-        if (!duree) return 0;
-        const str = String(duree).replace(',', '.');
-        if (str.includes(':')) {
-            const [h, m] = str.split(':').map(Number);
-            return (h || 0) + (m || 0)/60;
+    if (typeof duree === 'number') return duree;
+    if (duree && typeof duree === 'string') {
+        if (duree.includes(':')) {
+          const [h, m] = duree.split(':').map(Number);
+          return (h || 0) + (m || 0)/60;
+        } else {
+          return parseFloat(duree.replace(',', '.')) || 0;
         }
-        return parseFloat(str) || 0;
-    } catch (e) { return 0; }
+    }
+    return 0;
 };
 
-const getEventTimeRange = (dateObj, timeStr, durationHrs) => {
-    if (!dateObj) return null;
-    // Si pas d'heure, on ne calcule pas de range précis
-    if (!timeStr || typeof timeStr !== 'string' || !timeStr.includes(':')) return null;
-    try {
-        const [h, m] = timeStr.split(':').map(Number);
-        if (isNaN(h)) return null; 
-        const start = new Date(dateObj);
-        start.setHours(h, m || 0, 0, 0);
-        const end = new Date(start);
-        end.setMinutes(start.getMinutes() + (durationHrs * 60));
-        return { start: start.getTime(), end: end.getTime() };
-    } catch (e) { return null; }
-};
+// --- CALCUL AVANCEMENT ---
+const getRemainingLoad = (categorie) => {
+    if (!categorie) return 0.5; 
 
-const getOverlapHours = (range1, range2) => {
-    if (!range1 || !range2) return 0;
-    const start = Math.max(range1.start, range2.start);
-    const end = Math.min(range1.end, range2.end);
-    if (end <= start) return 0;
-    return (end - start) / (1000 * 60 * 60); 
+    const cat = categorie.trim();
+    let completion = 0.5; 
+
+    if (cat.includes('Préparation tenant 365')) completion = 0.15;
+    else if (cat.includes('Attente retour client')) completion = 0.05;
+    else if (cat.includes('Attente retour presta')) completion = 0.05;
+    else if (cat.includes('Bloqué cause client/presta')) completion = 0.05;
+    else if (cat.includes('Copie en cours')) completion = 0.75;
+    else if (cat.includes('Suspendu')) completion = 0.05;
+    else if (cat.includes('Prêt pour mise en place')) completion = 1.0; 
+    else if (cat.includes('A planifier')) completion = 1.0; 
+    
+    return Math.max(0, 1.0 * (1 - completion));
 };
 
 // --- COMPOSANTS UI ---
 
-const KPICard = ({ title, value, subtext, icon: Icon, colorClass }) => (
-  <div className="px-4 py-3 rounded-lg shadow-sm border bg-white border-slate-100 flex items-center justify-between">
+const KPICard = ({ title, value, subtext, icon: Icon, colorClass, active, onClick }) => (
+  <div 
+    onClick={onClick}
+    className={`px-4 py-3 rounded-lg shadow-sm border transition-all duration-300 flex items-center justify-between ${active ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-100' : 'bg-white border-slate-100'} ${onClick ? 'cursor-pointer hover:bg-slate-50' : ''}`}
+  >
     <div>
-      <p className="text-xs font-semibold text-slate-500 uppercase">{title}</p>
-      <div className="flex items-baseline gap-2"><h3 className="text-xl font-bold text-slate-800">{value}</h3>{subtext && <p className={`text-xs font-medium ${colorClass}`}>{subtext}</p>}</div>
+      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{title}</p>
+      <div className="flex items-baseline gap-2">
+        <h3 className="text-xl font-bold text-slate-800">{value}</h3>
+        {subtext && <p className={`text-xs font-medium ${colorClass}`}>{subtext}</p>}
+      </div>
     </div>
-    <div className={`p-2 rounded-md ${colorClass.replace('text-', 'bg-').replace('600', '100')}`}><Icon className={`w-4 h-4 ${colorClass}`} /></div>
+    <div className={`p-2 rounded-md ${colorClass.replace('text-', 'bg-').replace('600', '100').replace('500', '100')}`}>
+      <Icon className={`w-4 h-4 ${colorClass}`} />
+    </div>
   </div>
 );
 
 const SortableHeader = ({ label, sortKey, currentSort, onSort, align = 'left' }) => {
   const isSorted = currentSort.key === sortKey;
   return (
-    <th className={`px-2 py-2 font-semibold whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors group select-none text-${align}`} onClick={() => onSort(sortKey)}>
-      <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start'}`}>{label}<span className="text-slate-400">{isSorted ? (currentSort.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : (<ArrowUpDown size={12} className="opacity-0 group-hover:opacity-50" />)}</span></div>
+    <th 
+      className={`px-2 py-2 font-semibold whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors group select-none text-${align}`}
+      onClick={() => onSort(sortKey)}
+    >
+      <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start'}`}>
+        {label}
+        <span className="text-slate-400">
+          {isSorted ? (
+            currentSort.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />
+          ) : (
+            <ArrowUpDown size={12} className="opacity-0 group-hover:opacity-50" />
+          )}
+        </span>
+      </div>
     </th>
   );
 };
 
-// --- APPLICATION ---
+const PipeProgress = ({ label, count, colorClass, barColor }) => {
+    const percentage = Math.min((count / 15) * 100, 100);
+    return (
+        <div className="flex flex-col w-full">
+            <div className="flex justify-between items-end mb-1">
+                <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">{label}</span>
+                <span className={`text-sm font-bold ${colorClass}`}>{count}</span>
+            </div>
+            <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                <div className={`h-full rounded-full transition-all duration-500 ease-out ${barColor}`} style={{ width: `${percentage}%` }} />
+            </div>
+        </div>
+    );
+};
+
+// --- APPLICATION PRINCIPALE ---
 
 function MigrationDashboard() {
   const [backofficeData, setBackofficeData] = useState([]);
   const [encoursData, setEncoursData] = useState([]);
-  const [techList] = useState(TECH_LIST_DEFAULT);
+  const [techList, setTechList] = useState(TECH_LIST_DEFAULT);
   const [isLoading, setIsLoading] = useState(true);
-  const [selectedTech, setSelectedTech] = useState('Tous');
   
-  // Debug & Erreurs
+  const [selectedTech, setSelectedTech] = useState('Tous');
+  const [selectedMonth, setSelectedMonth] = useState(null);
+  const [showPlanning, setShowPlanning] = useState(false); 
+
+  const [isDetailListExpanded, setIsDetailListExpanded] = useState(true);
+  const [isTableExpanded, setIsTableExpanded] = useState(false); 
+  const [isTechChartExpanded, setIsTechChartExpanded] = useState(false); 
+
+  // --- DEBUG STATE ---
   const [debugData, setDebugData] = useState(null);
   const [isDebugOpen, setIsDebugOpen] = useState(false);
+
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
-  const [isDetailListExpanded, setIsDetailListExpanded] = useState(true);
 
   const { getToken } = useAuth(); 
 
@@ -141,288 +208,674 @@ function MigrationDashboard() {
       setIsLoading(true);
       try {
         const token = await getToken();
-        const response = await fetch('/api/getData', { headers: { Authorization: `Bearer ${token}` } });
+        const response = await fetch('/api/getData', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
         const json = await response.json();
+        
+        // Sauvegarde des données brutes pour le debug
         setDebugData(json);
 
         if (!response.ok) throw new Error(json.error || `Erreur API`);
         
-        if (Array.isArray(json.backoffice)) setBackofficeData(json.backoffice); 
-        else setBackofficeData([]); // Sécurité si pas array
-
-        if (Array.isArray(json.encours)) setEncoursData(json.encours);
-        else setEncoursData([]); // Sécurité
-
+        if (json.backoffice) setBackofficeData(json.backoffice); 
+        if (json.encours) setEncoursData(json.encours);
+        setIsLoading(false);
       } catch (err) {
         console.error("❌ Erreur API :", err);
-        setDebugData({ error: err.message });
-      } finally {
+        setDebugData({ error: err.message }); // Capture l'erreur pour la console
         setIsLoading(false);
       }
     };
     fetchData();
   }, [getToken]);
   
-  // --- CŒUR DU CALCUL (SECURISE AVEC TRY-CATCH) ---
-  const { processedEvents, kpiStats, logs } = useMemo(() => {
-    const logs = [];
-    const log = (msg) => logs.push(msg);
+  // --- TRAITEMENT CORE ---
 
-    // Initialisation valeurs par défaut
-    const emptyResult = { processedEvents: [], kpiStats: { besoin: 0, capacite: 0, ratio: 0 }, logs };
-
-    if (!backofficeData || backofficeData.length === 0) return emptyResult;
-
-    try {
-        let allEvents = [];
-        let rejectCount = { date: 0, tech: 0, relevant: 0 };
-
-        // 1. NORMALISATION ET FILTRAGE
-        backofficeData.forEach((row, index) => {
-            if (!row) return;
-            const cleanRow = normalizeRowKeys(row);
-            
-            // Debug de la première ligne pour vérifier les colonnes
-            if (index === 0) log(`🔍 Clés détectées : ${JSON.stringify(Object.keys(cleanRow))}`);
-
-            // Gestion sécurisée des Strings
-            const typeEventRaw = cleanRow['EVENEMENT'] || "";
-            const typeEventLower = String(typeEventRaw).toLowerCase();
-            
-            // Filtre
-            const isBackoffice = typeEventLower.includes('backoffice') || typeEventLower.includes('back office');
-            const isRelevant = typeEventLower.includes("avocatmail") || typeEventLower.includes("adwin") || typeEventLower.includes("migration") || typeEventLower.includes("analyse") || isBackoffice;
-
-            if (!isRelevant) {
-                rejectCount.relevant++;
-                return;
-            }
-
-            const dateStr = cleanRow['DATE'];
-            const dateEvent = parseDateSafe(dateStr);
-            if (!dateEvent) {
-                rejectCount.date++;
-                if (index < 3) log(`⚠️ Date invalide ligne ${index}: ${JSON.stringify(dateStr)}`);
-                return;
-            }
-
-            const resp = cleanRow['RESPONSABLE'];
-            const tech = normalizeTechName(resp, techList);
-            
-            const timeStr = cleanRow['HEURE']; 
-            const duree = cleanRow['DUREE_HRS'];
-            const duration = calculateDuration(duree);
-            
-            // Calcul plage horaire (peut être null)
-            const timeRange = getEventTimeRange(dateEvent, timeStr, duration);
-            
-            const dossier = cleanRow['DOSSIER'] || cleanRow['LIBELLE'] || 'Inconnu';
-            const nbUsers = cleanRow['NB_USERS'] || cleanRow['USER'] || '1';
-
-            allEvents.push({
-                id: Math.random(),
-                date: dateEvent.toISOString().split('T')[0],
-                month: dateEvent.toISOString().split('T')[0].substring(0, 7),
-                tech,
-                typeRaw: typeEventRaw,
-                isBackoffice,
-                duration,
-                timeRange,
-                dossier,
-                nbUsers,
-                netCapacity: 0, 
-                netNeed: 0,
-                isAbsorbed: false
-            });
-        });
-
-        log(`📊 Import: ${allEvents.length} événements valides. Rejets Date: ${rejectCount.date}`);
-
-        // 2. DEDUCTION (ABSORPTION)
-        const boEvents = allEvents.filter(e => e.isBackoffice);
-        const techEvents = allEvents.filter(e => !e.isBackoffice);
-
-        // Initialisation
-        boEvents.forEach(bo => bo.netCapacity = bo.duration); 
-        techEvents.forEach(te => {
-            const users = parseInt(te.nbUsers, 10) || 1;
-            let baseNeed = 1.0;
-            if (users > 5) baseNeed += (users - 5) * (10/60);
-            te.netNeed = Math.max(te.duration, baseNeed);
-        });
-
-        // Logique de collision
-        techEvents.forEach(te => {
-            const boMatch = boEvents.find(bo => 
-                bo.tech === te.tech && 
-                bo.date === te.date && 
-                bo.timeRange && te.timeRange &&
-                getOverlapHours(bo.timeRange, te.timeRange) > 0
-            );
-
-            if (boMatch) {
-                const overlap = getOverlapHours(boMatch.timeRange, te.timeRange);
-                boMatch.netCapacity = Math.max(0, boMatch.netCapacity - overlap);
-                te.netNeed = 0; // Annulation du besoin
-                te.isAbsorbed = true;
-            }
-        });
-
-        // 3. AGRÉGATION FINALE
-        const finalEvents = [...boEvents, ...techEvents].filter(e => selectedTech === 'Tous' || e.tech === selectedTech);
-        
-        let totalBesoin = 0, totalCapa = 0;
-        finalEvents.forEach(e => {
-            // Pour l'affichage, on formate les objets pour le tableau
-            e.status = e.isBackoffice 
-                ? (e.netCapacity < e.duration ? `Prod BO (Net: ${e.netCapacity.toFixed(1)}h)` : 'Production (Backoffice)')
-                : (e.isAbsorbed ? 'Planifié (Inclus BO)' : 'Besoin (Analyse/Migr)');
-            
-            e.color = e.isBackoffice ? 'purple' : (e.isAbsorbed ? 'slate' : 'cyan');
-
-            if(e.isBackoffice) totalCapa += e.netCapacity;
-            else totalBesoin += e.netNeed;
-        });
-
-        return { 
-            processedEvents: finalEvents, 
-            kpiStats: { besoin: totalBesoin, capacite: totalCapa, ratio: totalBesoin > 0 ? (totalCapa/totalBesoin)*100 : 0 },
-            logs 
-        };
-
-    } catch (e) {
-        console.error("CRITICAL ERROR:", e);
-        log(`🔥 CRASH CALCUL: ${e.message}`);
-        return emptyResult;
+  const { detailedData, eventsData, planningCount, analysisPipeCount, availableMonths } = useMemo(() => {
+    if (backofficeData.length === 0 && encoursData.length === 0) {
+        return { detailedData: [], eventsData: [], planningCount: 0, analysisPipeCount: 0, availableMonths: [] };
     }
 
-  }, [backofficeData, selectedTech, techList]);
+    const events = [];
+    const planningEventsList = [];
+    const monthlyStats = new Map();
+    const monthsSet = new Set(); 
 
-  // Préparation Graphique Mensuel
-  const chartData = useMemo(() => {
-      const agg = {};
-      processedEvents.forEach(ev => {
-          if (!agg[ev.month]) agg[ev.month] = { month: ev.month, label: formatMonthShort(ev.month), besoin: 0, capacite: 0 };
-          if (ev.isBackoffice) agg[ev.month].capacite += ev.netCapacity;
-          else agg[ev.month].besoin += ev.netNeed;
+    const deductionsMap = new Map();
+    
+    // --- 1. INDEXATION DES CRENEAUX BACKOFFICE ---
+    const techBackofficeSchedule = {}; 
+
+    backofficeData.forEach(row => {
+        const cleanRow = {};
+        Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
+        
+        const typeEvent = cleanRow['EVENEMENT'];
+        const dateStr = cleanRow['DATE'];
+        const timeStr = cleanRow['HEURE'];
+        const resp = cleanRow['RESPONSABLE'];
+        const duree = cleanRow['DUREE_HRS'];
+
+        if (!dateStr || !resp) return;
+        const tech = normalizeTechName(resp, techList);
+        
+        // FILTRE STRICT
+        if (!techList.includes(tech)) return;
+
+        const dateEvent = parseDateSafe(dateStr);
+        if(!dateEvent) return;
+        
+        const dateKey = dateEvent.toISOString().split('T')[0];
+        
+        // A. Indexation des créneaux
+        if (typeEvent === 'Tache de backoffice Avocatmail') {
+            if (!techBackofficeSchedule[tech]) techBackofficeSchedule[tech] = [];
+            techBackofficeSchedule[tech].push(dateEvent.getTime()); 
+        }
+        
+        // B. Calcul des Déductions
+        if (typeEvent !== 'Tache de backoffice Avocatmail' && timeStr) {
+            const timeKey = timeStr.substring(0, 5); 
+            const key = `${dateKey}_${timeKey}_${tech}`;
+            const duration = calculateDuration(duree);
+            const currentDeduction = deductionsMap.get(key) || 0;
+            deductionsMap.set(key, currentDeduction + duration);
+        }
+    });
+
+    Object.keys(techBackofficeSchedule).forEach(t => {
+        techBackofficeSchedule[t].sort((a, b) => a - b);
+    });
+
+    let countReadyMiseEnPlace = 0;
+    let countReadyAnalyse = 0; 
+
+    // Helper 
+    const addToStats = (month, tech, besoin, besoin_encours, capacite) => {
+        monthsSet.add(month);
+        const key = `${month}_${tech}`;
+        if (!monthlyStats.has(key)) {
+            monthlyStats.set(key, { month, tech, besoin: 0, besoin_encours: 0, capacite: 0 });
+        }
+        const entry = monthlyStats.get(key);
+        entry.besoin += besoin;
+        entry.besoin_encours += besoin_encours;
+        entry.capacite += capacite;
+    };
+
+    // 2. BACKOFFICE (TRAITEMENT PRINCIPAL)
+    // IMPORTANT : On ajoute ici les filtres pour les événements de la nouvelle vue
+    const allowedNeedEvents = [
+        'Avocatmail - Analyse', 
+        'Migration messagerie Adwin', 
+        'Migration messagerie Adwin - analyse',
+        'Tache de backoffice Avocatmail' 
+    ];
+
+    backofficeData.forEach(row => {
+      const cleanRow = {};
+      Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
+
+      const typeEvent = cleanRow['EVENEMENT'];
+      const dateStr = cleanRow['DATE'];
+      const timeStr = cleanRow['HEURE'];
+      const resp = cleanRow['RESPONSABLE'];
+      const duree = cleanRow['DUREE_HRS'];
+      const dossier = cleanRow['DOSSIER'] || cleanRow['LIBELLE'] || 'Client Inconnu';
+      const nbUsers = cleanRow['NB_USERS'] || cleanRow['USER'] || '1'; // Adaptation possible
+
+      if (!typeEvent) return;
+      
+      // Filtrage partiel : on vérifie si l'événement contient des mots clés si le nom exact ne matche pas
+      // C'est une sécurité pour la nouvelle vue
+      const isRelevant = allowedNeedEvents.includes(typeEvent) || 
+                         (typeEvent.includes("Avocatmail") && typeEvent.includes("Analyse"));
+
+      if (!isRelevant) return;
+      
+      const tech = normalizeTechName(resp, techList);
+      if (!techList.includes(tech)) return;
+
+      const dateEvent = parseDateSafe(dateStr);
+      if (!dateEvent) return;
+      
+      const dateFormatted = dateEvent.toISOString().split('T')[0];
+      const month = dateFormatted.substring(0, 7);
+      const duration = calculateDuration(duree);
+
+      let besoin = 0; let capacite = 0; let color = 'gray'; let status = '';
+
+      if (typeEvent === 'Tache de backoffice Avocatmail') {
+        const timeKey = timeStr ? timeStr.substring(0, 5) : '';
+        const key = `${dateFormatted}_${timeKey}_${tech}`;
+        const deduction = deductionsMap.get(key) || 0;
+        
+        capacite = Math.max(0, duration - deduction);
+        color = 'purple';
+        status = 'Production (Backoffice)';
+      } else {
+        // C'est un besoin
+        const users = parseInt(nbUsers, 10) || 1;
+        besoin = 1.0;
+        if (users > 5) besoin += (users - 5) * (10/60);
+        color = 'cyan';
+        status = 'Besoin (Analyse/Migr)';
+      }
+
+      addToStats(month, tech, besoin, 0, capacite);
+
+      events.push({
+        date: dateFormatted,
+        tech,
+        client: dossier,
+        type: typeEvent,
+        duration: Math.max(besoin, capacite), 
+        status,
+        color,
+        raw_besoin: besoin,
+        raw_capacite: capacite,
+        raw_besoin_encours: 0
       });
-      return Object.values(agg).sort((a,b) => a.month.localeCompare(b.month));
-  }, [processedEvents]);
+    });
 
-  // Tri du tableau
+    // 3. ENCOURS (LOGIQUE GLISSANTE + CHARGE PONDÉRÉE)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayTime = today.getTime();
+
+    encoursData.forEach(row => {
+        const cleanRow = {};
+        Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
+        const techNameRaw = cleanRow['RESPONSABLE'];
+        const categorie = cleanRow['CATEGORIE'];
+        const reportDateStr = cleanRow['REPORTE_LE'];
+        const clientName = cleanRow['INTERLOCUTEUR'] || 'Client Inconnu';
+        const tech = normalizeTechName(techNameRaw, techList);
+        
+        if (!techList.includes(tech)) return;
+
+        if (categorie === 'Prêt pour mise en place') {
+            countReadyMiseEnPlace++;
+            planningEventsList.push({
+                date: "N/A", tech, client: clientName, type: "Prêt pour Mise en Place",
+                duration: 0, status: "A Planifier (Migr)", color: "indigo"
+            });
+            return;
+        }
+        
+        if (categorie === 'Prêt pour analyse' || categorie === 'A Planifier (Analyse)') {
+            countReadyAnalyse++;
+            planningEventsList.push({
+                date: "N/A", tech, client: clientName, type: "Prêt pour Analyse",
+                duration: 0, status: "A Planifier (Analyse)", color: "cyan"
+            });
+        }
+
+        const reportDate = parseDateSafe(reportDateStr);
+        let targetDate = null;
+        let status = "";
+        let color = "";
+        let isReported = false;
+
+        // CALCUL DE LA CHARGE RESTANTE
+        const remainingLoad = getRemainingLoad(categorie);
+
+        if (remainingLoad <= 0) return;
+
+        // CAS 1 : DATE DE REPORT FORCÉE
+        if (reportDate) {
+            targetDate = reportDate;
+            status = "Reporté";
+            color = "red";
+            isReported = true;
+        } 
+        // CAS 2 : GLISSEMENT SUR PROCHAIN CRÉNEAU
+        else {
+            const techSlots = techBackofficeSchedule[tech] || [];
+            const targetSlotTime = techSlots.find(t => t >= todayTime);
+
+            if (targetSlotTime) {
+                targetDate = new Date(targetSlotTime);
+                status = "Auto (Prochain BO)";
+                color = "amber";
+            } else {
+                targetDate = new Date(today);
+                targetDate.setDate(today.getDate() + 7);
+                status = "En attente (Pas de BO dispo)";
+                color = "slate";
+            }
+        }
+
+        if (targetDate) {
+            const targetDateStr = targetDate.toISOString().split('T')[0];
+            const targetMonth = targetDateStr.substring(0, 7);
+
+            addToStats(targetMonth, tech, 0, remainingLoad, 0);
+
+            events.push({
+                date: targetDateStr,
+                tech,
+                client: clientName,
+                type: `Encours (${categorie || "Non classé"})`,
+                duration: remainingLoad,
+                status: status,
+                color: color,
+                raw_besoin: 0,
+                raw_capacite: 0,
+                raw_besoin_encours: remainingLoad
+            });
+        }
+    });
+
+    const detailedDataArray = Array.from(monthlyStats.values()).sort((a, b) => a.month.localeCompare(b.month));
+    const sortedMonths = Array.from(monthsSet).sort().reverse(); 
+
+    return {
+        detailedData: detailedDataArray,
+        eventsData: [...planningEventsList, ...events],
+        planningCount: countReadyMiseEnPlace,
+        analysisPipeCount: countReadyAnalyse,
+        availableMonths: sortedMonths
+    };
+  }, [backofficeData, encoursData, techList]);
+
+  // --- LOGIQUE TRI & AFFICHAGE ---
   const handleSort = (key) => {
     let direction = 'asc';
     if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
     setSortConfig({ key, direction });
   };
 
-  const sortedTableData = useMemo(() => {
-      let data = [...processedEvents];
-      if (sortConfig.key) {
-          data.sort((a, b) => {
-              let valA = a[sortConfig.key];
-              let valB = b[sortConfig.key];
-              if (typeof valA === 'string') valA = valA.toLowerCase();
-              if (typeof valB === 'string') valB = valB.toLowerCase();
-              if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
-              if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
-              return 0;
-          });
+  const filteredAndSortedEvents = useMemo(() => {
+    let events = eventsData;
+    if (selectedTech !== 'Tous') events = events.filter(e => e.tech === selectedTech);
+    
+    if (showPlanning) events = events.filter(e => e.status.includes("A Planifier"));
+    else if (selectedMonth) events = events.filter(e => e.date !== "N/A" && e.date.startsWith(selectedMonth));
+    else events = events.filter(e => e.date !== "N/A");
+
+    if (sortConfig.key) {
+      events.sort((a, b) => {
+        let valA = a[sortConfig.key];
+        let valB = b[sortConfig.key];
+        if (sortConfig.key === 'date') {
+            if (valA === 'N/A') valA = '0000-00-00';
+            if (valB === 'N/A') valB = '0000-00-00';
+        }
+        if (typeof valA === 'string') valA = valA.toLowerCase();
+        if (typeof valB === 'string') valB = valB.toLowerCase();
+        if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+    return events;
+  }, [selectedTech, selectedMonth, showPlanning, eventsData, sortConfig]);
+
+  const monthlyAggregatedData = useMemo(() => {
+    if (detailedData.length === 0) return [];
+    
+    const dataToUse = selectedTech === 'Tous' ? detailedData : detailedData.filter(d => d.tech === selectedTech);
+    const aggMap = new Map();
+    dataToUse.forEach(item => {
+      if (!aggMap.has(item.month)) aggMap.set(item.month, { month: item.month, label: formatMonthShort(item.month), besoin: 0, besoin_encours: 0, capacite: 0 });
+      const entry = aggMap.get(item.month);
+      entry.besoin += item.besoin;
+      entry.besoin_encours += item.besoin_encours;
+      entry.capacite += item.capacite;
+    });
+
+    const allMonthsKeys = Array.from(aggMap.keys()).sort();
+    if(allMonthsKeys.length === 0) return [];
+
+    const [startYear, startMonth] = allMonthsKeys[0].split('-').map(Number);
+    const [endYear, endMonth] = allMonthsKeys[allMonthsKeys.length - 1].split('-').map(Number);
+    
+    const result = [];
+    let currentY = startYear;
+    let currentM = startMonth;
+
+    while (currentY < endYear || (currentY === endYear && currentM <= endMonth)) {
+        const mStr = `${currentY}-${String(currentM).padStart(2, '0')}`;
+        const data = aggMap.get(mStr) || { month: mStr, label: formatMonthShort(mStr), besoin: 0, besoin_encours: 0, capacite: 0 };
+        const totalBesoinMois = data.besoin + data.besoin_encours;
+        result.push({
+            ...data,
+            totalBesoinMois,
+            soldeMensuel: data.capacite - totalBesoinMois
+        });
+        currentM++;
+        if (currentM > 12) {
+            currentM = 1;
+            currentY++;
+        }
+    }
+    return result;
+  }, [detailedData, selectedTech]);
+
+  const weeklyAggregatedData = useMemo(() => {
+      if (!selectedMonth) return [];
+      let relevantEvents = eventsData.filter(e => e.date !== "N/A" && e.date.startsWith(selectedMonth));
+      if (selectedTech !== 'Tous') relevantEvents = relevantEvents.filter(e => e.tech === selectedTech);
+
+      const weekMap = new Map();
+      relevantEvents.forEach(evt => {
+          const weekNum = getWeekLabel(evt.date); 
+          const weekRange = getWeekRange(evt.date); 
+          const label = `${weekNum} (${weekRange})`; 
+
+          if (!weekMap.has(weekNum)) {
+              weekMap.set(weekNum, { 
+                  month: weekNum, 
+                  label: label, 
+                  weekSort: parseInt(weekNum.replace('S', '')),
+                  besoin: 0, besoin_encours: 0, capacite: 0 
+              });
+          }
+          const entry = weekMap.get(weekNum);
+          entry.besoin += (evt.raw_besoin || 0);
+          entry.besoin_encours += (evt.raw_besoin_encours || 0);
+          entry.capacite += (evt.raw_capacite || 0);
+      });
+
+      return Array.from(weekMap.values()).sort((a, b) => a.weekSort - b.weekSort);
+  }, [eventsData, selectedMonth, selectedTech]);
+
+  const mainChartData = selectedMonth ? weeklyAggregatedData : monthlyAggregatedData;
+
+  const techAggregatedData = useMemo(() => {
+    const aggMap = new Map();
+    let eventsToUse = eventsData.filter(e => e.date !== "N/A");
+    if(selectedMonth) eventsToUse = eventsToUse.filter(e => e.date.startsWith(selectedMonth));
+
+    eventsToUse.forEach(item => {
+      if (!aggMap.has(item.tech)) aggMap.set(item.tech, { name: item.tech, besoin: 0, besoin_encours: 0, capacite: 0 });
+      const entry = aggMap.get(item.tech);
+      entry.besoin += (item.raw_besoin || 0);
+      entry.besoin_encours += (item.raw_besoin_encours || 0);
+      entry.capacite += (item.raw_capacite || 0);
+    });
+    return Array.from(aggMap.values());
+  }, [eventsData, selectedMonth]);
+
+  const kpiStats = useMemo(() => {
+    if (mainChartData.length === 0) return { besoin: 0, capacite: 0, ratio: 0 };
+    const totalBesoin = mainChartData.reduce((acc, curr) => acc + (curr.totalBesoinMois || (curr.besoin + curr.besoin_encours)), 0);
+    const totalCapacite = mainChartData.reduce((acc, curr) => acc + curr.capacite, 0);
+    const ratio = totalBesoin > 0 ? (totalCapacite / totalBesoin) * 100 : 0;
+    return { besoin: totalBesoin, capacite: totalCapacite, ratio };
+  }, [mainChartData]);
+
+  const handleChartClick = (data) => {
+    if (data && data.activeLabel && !selectedMonth) {
+       setSelectedMonth(data.activeLabel);
+       setShowPlanning(false); 
+    }
+  };
+
+  const toggleViewMode = (mode) => {
+      setShowPlanning(false);
+      if (mode === 'months') {
+          setSelectedMonth(null);
+      } else {
+          if (!selectedMonth) {
+              const current = getCurrentMonthKey();
+              setSelectedMonth(availableMonths.includes(current) ? current : availableMonths[0]);
+          }
       }
-      return data;
-  }, [processedEvents, sortConfig]);
+  };
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 relative">
-      <header className="mb-4 flex justify-between items-center bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500 relative">
+      
+      {/* HEADER */}
+      <header className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
         <div className="flex items-center gap-3">
-          <div className="bg-blue-100 p-2 rounded-md"><Activity className="w-5 h-5 text-blue-600" /></div>
-          <div><h1 className="text-lg font-bold">Pilotage Migrations</h1><p className="text-xs text-slate-500">{processedEvents.length} événements chargés</p></div>
+          <div className="bg-blue-100 p-2 rounded-md">
+            {isLoading ? <Loader className="w-5 h-5 text-blue-600 animate-spin" /> : <Activity className="w-5 h-5 text-blue-600" />}
+          </div>
+          <div>
+            <h1 className="text-lg font-bold text-slate-800 leading-tight">Pilotage Migrations</h1>
+            <p className="text-xs text-slate-500 flex items-center gap-2">{selectedTech === 'Tous' ? "Vue Équipe" : `Focus: ${selectedTech}`}</p>
+          </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
             <UserButton />
-            <select value={selectedTech} onChange={(e) => setSelectedTech(e.target.value)} className="text-sm bg-slate-50 border border-slate-200 rounded-md p-1">
-                <option value="Tous">Tous</option>
-                {TECH_LIST_DEFAULT.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <div className="relative">
+                <Filter className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
+                <select 
+                    value={selectedTech} 
+                    onChange={(e) => { setSelectedTech(e.target.value); }}
+                    className="pl-7 pr-3 py-1.5 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                >
+                    <option value="Tous">Tous les techs</option>
+                    {techList.map(tech => (<option key={tech} value={tech}>{tech}</option>))}
+                </select>
+            </div>
+            {(selectedMonth || showPlanning) && (
+              <button 
+                onClick={() => { setSelectedMonth(null); setShowPlanning(false); }}
+                className="flex items-center gap-1 bg-red-50 text-red-600 px-3 py-1.5 rounded-md text-xs font-medium hover:bg-red-100 transition-colors border border-red-100"
+              >
+                <X className="w-3 h-3" /> Retour Vue Globale
+              </button>
+            )}
         </div>
       </header>
 
-      {/* KPI */}
-      <div className="grid grid-cols-3 gap-3 mb-4">
-        <KPICard title="Besoin Net (h)" value={kpiStats.besoin.toFixed(1)} icon={Users} colorClass="text-cyan-600" />
-        <KPICard title="Capacité Nette (h)" value={kpiStats.capacite.toFixed(1)} icon={Clock} colorClass="text-purple-600" />
-        <KPICard title="Taux Couverture" value={`${kpiStats.ratio.toFixed(0)}%`} icon={TrendingUp} colorClass={kpiStats.ratio >= 100 ? "text-emerald-600" : "text-red-600"} />
+      {/* KPI GRID */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        {/* NOUVEAU DOUBLE PIPE (BARRES) */}
+        <div 
+            onClick={() => { setShowPlanning(!showPlanning); setSelectedMonth(null); }}
+            className={`px-4 py-3 rounded-lg shadow-sm border flex flex-col justify-center cursor-pointer transition-all duration-200 gap-3
+            ${showPlanning ? 'bg-indigo-50 border-indigo-200 ring-2 ring-indigo-100' : 'bg-white border-slate-100 hover:bg-slate-50'}`}
+        >
+            <PipeProgress label="Prêt pour Mise en Place" count={planningCount} colorClass="text-indigo-600" barColor="bg-indigo-500" />
+            <PipeProgress label="Prêt pour Analyse" count={analysisPipeCount} colorClass="text-cyan-600" barColor="bg-cyan-500" />
+        </div>
+
+        <KPICard title="Besoin Total (h)" value={kpiStats.besoin.toFixed(0)} subtext={selectedMonth ? "Sur le mois" : "Annuel"} icon={Users} colorClass="text-slate-600" active={!!selectedMonth}/>
+        <KPICard title="Capacité (h)" value={kpiStats.capacite.toFixed(0)} subtext="Planifiée" icon={Clock} colorClass="text-purple-600" active={!!selectedMonth}/>
+        <KPICard title="Taux Couverture" value={`${kpiStats.ratio.toFixed(0)}%`} subtext="Capa. / Besoin" icon={TrendingUp} colorClass={kpiStats.ratio >= 100 ? "text-emerald-600" : "text-red-600"} active={!!selectedMonth}/>
       </div>
 
-      {/* CHART */}
-      <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 h-64 mb-4">
-        <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="label" style={{fontSize: 10}} />
-                <YAxis style={{fontSize: 10}} />
-                <Tooltip />
-                <Bar dataKey="besoin" fill="#06b6d4" barSize={20} name="Besoin" />
-                <Bar dataKey="capacite" fill="#a855f7" barSize={20} name="Capacité" />
-            </ComposedChart>
-        </ResponsiveContainer>
-      </div>
-
-      {/* TABLEAU */}
-      <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden mb-32">
-          <button onClick={() => setIsDetailListExpanded(!isDetailListExpanded)} className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors">
-            <div className="flex items-center gap-2"><FileText className="w-4 h-4 text-slate-400" /><span className="font-bold text-sm">Liste Détaillée ({processedEvents.length})</span></div>
-            {isDetailListExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-          </button>
-          
-          {isDetailListExpanded && (
-            <div className="max-h-96 overflow-auto">
-                <table className="w-full text-xs text-left">
-                    <thead className="bg-slate-50 sticky top-0">
-                        <tr>
-                            <SortableHeader label="Date" sortKey="date" currentSort={sortConfig} onSort={handleSort} />
-                            <SortableHeader label="Tech" sortKey="tech" currentSort={sortConfig} onSort={handleSort} />
-                            <SortableHeader label="Type" sortKey="typeRaw" currentSort={sortConfig} onSort={handleSort} />
-                            <SortableHeader label="Durée" sortKey="duration" currentSort={sortConfig} onSort={handleSort} align="right" />
-                            <SortableHeader label="Net" sortKey="netCapacity" currentSort={sortConfig} onSort={handleSort} align="right" />
-                            <SortableHeader label="Statut" sortKey="status" currentSort={sortConfig} onSort={handleSort} align="center" />
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {sortedTableData.map((ev, i) => (
-                            <tr key={i} className="border-t border-slate-50 hover:bg-slate-50">
-                                <td className="p-2 whitespace-nowrap">{ev.date}</td>
-                                <td className="p-2 whitespace-nowrap">{ev.tech}</td>
-                                <td className="p-2 truncate max-w-[200px]" title={ev.typeRaw}>{ev.typeRaw}</td>
-                                <td className="p-2 text-right">{ev.duration.toFixed(2)}h</td>
-                                <td className="p-2 text-right font-bold">{ev.isBackoffice ? ev.netCapacity.toFixed(2) : ev.netNeed.toFixed(2)}h</td>
-                                <td className="p-2 text-center"><span className={`px-2 py-0.5 rounded text-[10px] bg-${ev.color}-100 text-${ev.color}-700`}>{ev.status}</span></td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
+      {/* GRAPHIQUE PRINCIPAL */}
+      <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 mb-4">
+        <div className="flex flex-col sm:flex-row items-center justify-between mb-4 gap-4">
+            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">
+                <button onClick={() => toggleViewMode('months')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${!selectedMonth ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Vue Annuelle (Mois)</button>
+                <button onClick={() => toggleViewMode('weeks')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${selectedMonth ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Vue Détaillée (Semaines)</button>
             </div>
-          )}
+            {selectedMonth && (
+                <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-200">
+                    <span className="text-xs text-slate-500 font-medium">Mois :</span>
+                    <select value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="text-sm border border-slate-200 rounded-md py-1 px-2 focus:ring-blue-500 bg-white">
+                        {availableMonths.map(m => (<option key={m} value={m}>{formatMonth(m)}</option>))}
+                    </select>
+                </div>
+            )}
+            <div className="flex gap-3 text-[10px] font-medium uppercase tracking-wider text-slate-500 ml-auto">
+                <div className="flex items-center gap-1"><span className="w-2 h-2 bg-cyan-500 rounded-full"></span> Besoin</div>
+                <div className="flex items-center gap-1"><span className="w-2 h-2 bg-amber-500 rounded-full"></span> En Cours</div>
+                <div className="flex items-center gap-1"><span className="w-2 h-2 bg-purple-500 rounded-full"></span> Capacité</div>
+            </div>
+        </div>
+        <div className="h-64 w-full cursor-pointer">
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={mainChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }} onClick={handleChartClick}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+              <XAxis 
+                dataKey={selectedMonth ? "label" : "month"} 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{fill: '#64748b', fontSize: 10}} 
+                dy={5} 
+                tickFormatter={(val) => {
+                    if (String(val).startsWith('S')) return val;
+                    return formatMonthShort(val);
+                }}
+                interval={0} 
+              />
+              <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} />
+              <Tooltip 
+                cursor={{ fill: 'rgba(0,0,0,0.05)' }} 
+                contentStyle={{borderRadius: '6px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px', padding: '8px'}} 
+                labelFormatter={(val) => {
+                    if (String(val).startsWith('S')) return val; 
+                    return formatMonth(val);
+                }}
+                formatter={(value, name) => [`${parseFloat(value).toFixed(1)} h`, name === 'besoin' ? 'Besoin (Nouv.)' : name === 'besoin_encours' ? 'Besoin (En cours)' : name === 'capacite' ? 'Capacité' : name]} 
+              />
+              <Bar stackId="a" dataKey="besoin" fill="#06b6d4" radius={[0, 0, 0, 0]} barSize={selectedMonth ? 30 : 16} />
+              <Bar stackId="a" dataKey="besoin_encours" fill="#f59e0b" radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
+              <Bar stackId="b" dataKey="capacite" fill="#a855f7" radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+        {!selectedMonth && <p className="text-[10px] text-center text-slate-400 italic mt-1">Cliquez sur un mois pour voir le détail par semaine</p>}
       </div>
 
-      {/* DEBUG BAR */}
-      <div className={`fixed bottom-0 left-0 right-0 bg-slate-900 text-green-400 font-mono text-xs transition-all duration-300 flex flex-col ${isDebugOpen ? 'h-64' : 'h-8'}`}>
-        <button onClick={() => setIsDebugOpen(!isDebugOpen)} className="w-full bg-slate-800 text-white flex justify-between px-4 py-1">
-            <span>CONSOLE DEBUG ({logs.length} logs)</span>
-            {isDebugOpen ? <ChevronDown size={14}/> : <ChevronUp size={14}/>}
+      {/* --- LISTE DÉTAILLÉE --- */}
+      <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden mb-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
+        <button onClick={() => setIsDetailListExpanded(!isDetailListExpanded)} className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors">
+          <div className="flex items-center gap-2">
+            <FileText className="w-4 h-4 text-slate-400" /><h2 className="text-sm font-bold text-slate-800">Détail des Opérations {selectedTech !== 'Tous' ? `: ${selectedTech}` : "(Tous)"}</h2>
+            <span className="ml-2 text-xs font-normal text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">{filteredAndSortedEvents.length} entrées</span>
+          </div>
+          {isDetailListExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
         </button>
-        <div className="overflow-auto p-4 flex-1">
-            {debugData && debugData.error && <div className="text-red-400 font-bold mb-2">ERREUR API: {JSON.stringify(debugData)}</div>}
-            {logs.map((l, i) => <div key={i} className="border-b border-slate-800 py-1">{l}</div>)}
+        {isDetailListExpanded && (
+          <div className="overflow-x-auto max-h-96">
+            <table className="w-full text-xs text-left text-slate-600">
+              <thead className="text-xs text-slate-500 uppercase bg-slate-50/50 border-b border-slate-100 sticky top-0 backdrop-blur-sm z-10">
+                <tr>
+                  <SortableHeader label="Date" sortKey="date" currentSort={sortConfig} onSort={handleSort} />
+                  <SortableHeader label="Technicien" sortKey="tech" currentSort={sortConfig} onSort={handleSort} />
+                  <SortableHeader label="Client" sortKey="client" currentSort={sortConfig} onSort={handleSort} />
+                  <SortableHeader label="Type" sortKey="type" currentSort={sortConfig} onSort={handleSort} />
+                  <SortableHeader label="Durée" sortKey="duration" currentSort={sortConfig} onSort={handleSort} align="right" />
+                  <SortableHeader label="Statut" sortKey="status" currentSort={sortConfig} onSort={handleSort} align="center" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredAndSortedEvents.map((event, index) => (
+                  <tr key={index} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-2 py-1 font-medium text-slate-800 whitespace-nowrap">{event.date === "N/A" ? "En attente" : new Date(event.date).toLocaleDateString('fr-FR')}</td>
+                    <td className="px-2 py-1 whitespace-nowrap truncate max-w-[150px]">{event.tech}</td>
+                    <td className="px-2 py-1 font-medium text-slate-700 whitespace-nowrap truncate max-w-[200px]" title={event.client}>{event.client}</td>
+                    <td className="px-2 py-1 text-slate-500 whitespace-nowrap">{event.type}</td>
+                    <td className="px-2 py-1 text-right font-medium whitespace-nowrap">{event.duration > 0 ? event.duration.toFixed(2) : '-'}</td>
+                    <td className="px-2 py-1 text-center whitespace-nowrap"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${event.color === 'cyan' ? 'bg-cyan-100 text-cyan-700' : event.color === 'purple' ? 'bg-purple-100 text-purple-700' : event.color === 'indigo' ? 'bg-indigo-100 text-indigo-700' : event.color === 'amber' ? 'bg-amber-100 text-amber-700' : event.color === 'red' ? 'bg-red-100 text-red-700' : event.color === 'slate' ? 'bg-slate-200 text-slate-600' : 'bg-blue-100 text-blue-700'}`}>{event.status}</span></td>
+                  </tr>
+                ))}
+                {filteredAndSortedEvents.length === 0 && (<tr><td colSpan="6" className="px-4 py-8 text-center text-slate-400 italic">Aucun événement trouvé.</td></tr>)}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* --- BLOC BAS : CHARGE TECH & TABLEAU MENSUEL (REPLIÉS) --- */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+        {/* CHARGE PAR TECH */}
+        <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden h-fit">
+            <button onClick={() => setIsTechChartExpanded(!isTechChartExpanded)} className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors">
+                <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Users className="w-4 h-4 text-slate-400" />Charge par Tech {selectedMonth ? `(${formatMonth(selectedMonth)})` : "(Globale)"}</h2>
+                {isTechChartExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
+            </button>
+            {isTechChartExpanded && (
+                <div className="h-64 w-full p-4 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={techAggregatedData} layout="vertical" margin={{ top: 0, right: 10, left: 10, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
+                        <XAxis type="number" hide />
+                        <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fill: '#475569', fontSize: 10, fontWeight: 500}} width={120} />
+                        <Tooltip cursor={{fill: 'transparent'}} contentStyle={{borderRadius: '6px', fontSize: '12px'}} formatter={(value) => [`${parseFloat(value).toFixed(1)} h`, '']} />
+                        <Bar dataKey="besoin" fill="#06b6d4" barSize={12} stackId="a" radius={[0, 0, 0, 0]} />
+                        <Bar dataKey="besoin_encours" fill="#f59e0b" barSize={12} stackId="a" radius={[0, 2, 2, 0]} />
+                        <Bar dataKey="capacite" fill="#a855f7" barSize={12} radius={[0, 2, 2, 0]} stackId="b" />
+                        </BarChart>
+                    </ResponsiveContainer>
+                </div>
+            )}
+        </div>
+        <div className="hidden lg:block"></div> 
+      </div>
+
+      {/* TABLEAU MENSUEL */}
+      <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden mb-16">
+        <button onClick={() => setIsTableExpanded(!isTableExpanded)} className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors">
+          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2"><TableIcon className="w-4 h-4 text-slate-400" />Résultats Mensuels Détaillés (Globaux)</h2>
+          {isTableExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
+        </button>
+        {isTableExpanded && (
+          <div className="overflow-x-auto animate-in fade-in slide-in-from-top-2 duration-200">
+            <table className="w-full text-sm text-left text-slate-600">
+              <thead className="text-xs text-slate-500 uppercase bg-slate-50/50 border-b border-slate-100">
+                <tr>
+                    <th className="px-4 py-3 font-semibold">Mois</th>
+                    <th className="px-4 py-3 font-semibold text-right">Besoin Total</th>
+                    <th className="px-4 py-3 font-semibold text-right text-amber-500">Dont En Cours</th>
+                    <th className="px-4 py-3 font-semibold text-right text-purple-600">Capacité</th> 
+                    <th className="px-4 py-3 font-semibold text-right">Ecart Mensuel</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {monthlyAggregatedData.map((row) => (
+                  <tr key={row.month} className={`hover:bg-slate-50 transition-colors ${selectedMonth === row.month ? 'bg-blue-50/50' : ''}`}>
+                    <td className="px-4 py-2 font-medium text-slate-800 capitalize">{row.label}</td>
+                    <td className="px-4 py-2 text-right">{row.totalBesoinMois.toFixed(1)} h</td>
+                    <td className="px-4 py-2 text-right text-amber-500">{row.besoin_encours > 0 ? `${row.besoin_encours.toFixed(1)} h` : '-'}</td>
+                    <td className="px-4 py-2 text-right text-purple-600 font-medium">{row.capacite.toFixed(1)} h</td>
+                    <td className="px-4 py-2 text-right"><span className={`px-2 py-0.5 rounded text-xs font-medium ${row.soldeMensuel >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{row.soldeMensuel > 0 ? '+' : ''}{row.soldeMensuel.toFixed(1)} h</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* --- DEBUG CONSOLE (Rétractable) --- */}
+      <div className={`fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out ${isDebugOpen ? 'translate-y-0' : 'translate-y-[calc(100%-40px)]'}`}>
+        <div className="bg-slate-900 border-t border-slate-700 shadow-2xl flex flex-col h-64">
+            <button 
+                onClick={() => setIsDebugOpen(!isDebugOpen)}
+                className="w-full h-10 bg-slate-800 hover:bg-slate-700 text-white text-xs font-mono flex items-center justify-between px-4 transition-colors cursor-pointer border-b border-slate-700"
+            >
+                <div className="flex items-center gap-2">
+                    <Terminal size={14} className="text-green-400" />
+                    <span>CONSOLE DEBUG : SNOWFLAKE DATA</span>
+                    {debugData && (
+                        <span className={`px-2 py-0.5 rounded text-[10px] ${debugData.error ? 'bg-red-900 text-red-300' : 'bg-green-900 text-green-300'}`}>
+                            {debugData.error ? 'ERREUR API' : 'DONNÉES REÇUES'}
+                        </span>
+                    )}
+                </div>
+                {isDebugOpen ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+            </button>
+            <div className="flex-1 overflow-auto p-4 font-mono text-xs text-green-400 bg-slate-950">
+                {debugData ? (
+                    <pre>{JSON.stringify(debugData, null, 2)}</pre>
+                ) : (
+                    <div className="flex items-center gap-2 text-slate-500">
+                        <Activity size={14} className="animate-spin" /> Chargement des données...
+                    </div>
+                )}
+            </div>
         </div>
       </div>
+
     </div>
   );
 }
 
 export default function App() {
-  if (!clerkPubKey) return <div>Clé Clerk Manquante</div>;
+  if (!clerkPubKey) {
+    return <div className="flex items-center justify-center h-screen text-red-600 font-bold">Erreur : Clé Clerk manquante.</div>;
+  }
   return (
     <ClerkProvider publishableKey={clerkPubKey}>
       <SignedIn><MigrationDashboard /></SignedIn>
