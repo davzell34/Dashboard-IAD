@@ -78,17 +78,25 @@ const getCurrentMonthKey = () => {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
 
+// Parser de date robuste (Supporte YYYY-MM-DD, DD/MM/YYYY, Timestamp)
 const parseDateSafe = (dateStr) => {
     if (!dateStr) return null;
-    let cleanStr = dateStr;
-    if (typeof cleanStr !== 'string') return null; // Sécurité anti-crash
     
+    // Si c'est déjà un objet Date
+    if (dateStr instanceof Date) return dateStr;
+
+    let cleanStr = String(dateStr).trim();
+    
+    // Format DD/MM/YYYY
     if (cleanStr.includes('/')) {
         const parts = cleanStr.split(' ')[0].split('/'); 
         if (parts.length === 3) cleanStr = `${parts[2]}-${parts[1]}-${parts[0]}`;
-    } else if (cleanStr.includes('T')) {
+    } 
+    // Format ISO avec Time
+    else if (cleanStr.includes('T')) {
         cleanStr = cleanStr.split('T')[0];
     }
+
     const date = new Date(cleanStr);
     return isNaN(date.getTime()) ? null : date;
 };
@@ -106,10 +114,10 @@ const calculateDuration = (duree) => {
     return 0;
 };
 
-// Fonction pour calculer les plages horaires (Start/End Timestamps)
-// SÉCURISÉE CONTRE LES VALEURS NULL
+// Fonction Safe pour les plages horaires
 const getEventTimeRange = (dateObj, timeStr, durationHrs) => {
     if (!dateObj) return null;
+    // Si pas d'heure, on ne peut pas calculer de plage précise
     if (!timeStr || typeof timeStr !== 'string' || !timeStr.includes(':')) return null;
     
     const [h, m] = timeStr.split(':').map(Number);
@@ -124,7 +132,6 @@ const getEventTimeRange = (dateObj, timeStr, durationHrs) => {
     return { start: start.getTime(), end: end.getTime() };
 };
 
-// Fonction pour calculer le chevauchement en heures entre deux plages
 const getOverlapHours = (range1, range2) => {
     if (!range1 || !range2) return 0;
     const start = Math.max(range1.start, range2.start);
@@ -136,10 +143,8 @@ const getOverlapHours = (range1, range2) => {
 // --- CALCUL AVANCEMENT ---
 const getRemainingLoad = (categorie) => {
     if (!categorie) return 0.5; 
-
-    const cat = categorie.trim();
+    const cat = String(categorie).trim();
     let completion = 0.5; 
-
     if (cat.includes('Préparation tenant 365')) completion = 0.15;
     else if (cat.includes('Attente retour client')) completion = 0.05;
     else if (cat.includes('Attente retour presta')) completion = 0.05;
@@ -148,47 +153,36 @@ const getRemainingLoad = (categorie) => {
     else if (cat.includes('Suspendu')) completion = 0.05;
     else if (cat.includes('Prêt pour mise en place')) completion = 1.0; 
     else if (cat.includes('A planifier')) completion = 1.0; 
-    
     return Math.max(0, 1.0 * (1 - completion));
+};
+
+// --- HELPER NORMALISATION DES CLÉS JSON ---
+// Transforme { "Date": "...", "Heure": "..." } en { "DATE": "...", "HEURE": "..." }
+const normalizeRowKeys = (row) => {
+    const newRow = {};
+    Object.keys(row).forEach(key => {
+        newRow[key.toUpperCase().trim()] = row[key];
+    });
+    return newRow;
 };
 
 // --- COMPOSANTS UI ---
 
 const KPICard = ({ title, value, subtext, icon: Icon, colorClass, active, onClick }) => (
-  <div 
-    onClick={onClick}
-    className={`px-4 py-3 rounded-lg shadow-sm border transition-all duration-300 flex items-center justify-between ${active ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-100' : 'bg-white border-slate-100'} ${onClick ? 'cursor-pointer hover:bg-slate-50' : ''}`}
-  >
+  <div onClick={onClick} className={`px-4 py-3 rounded-lg shadow-sm border transition-all duration-300 flex items-center justify-between ${active ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-100' : 'bg-white border-slate-100'} ${onClick ? 'cursor-pointer hover:bg-slate-50' : ''}`}>
     <div>
       <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{title}</p>
-      <div className="flex items-baseline gap-2">
-        <h3 className="text-xl font-bold text-slate-800">{value}</h3>
-        {subtext && <p className={`text-xs font-medium ${colorClass}`}>{subtext}</p>}
-      </div>
+      <div className="flex items-baseline gap-2"><h3 className="text-xl font-bold text-slate-800">{value}</h3>{subtext && <p className={`text-xs font-medium ${colorClass}`}>{subtext}</p>}</div>
     </div>
-    <div className={`p-2 rounded-md ${colorClass.replace('text-', 'bg-').replace('600', '100').replace('500', '100')}`}>
-      <Icon className={`w-4 h-4 ${colorClass}`} />
-    </div>
+    <div className={`p-2 rounded-md ${colorClass.replace('text-', 'bg-').replace('600', '100').replace('500', '100')}`}><Icon className={`w-4 h-4 ${colorClass}`} /></div>
   </div>
 );
 
 const SortableHeader = ({ label, sortKey, currentSort, onSort, align = 'left' }) => {
   const isSorted = currentSort.key === sortKey;
   return (
-    <th 
-      className={`px-2 py-2 font-semibold whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors group select-none text-${align}`}
-      onClick={() => onSort(sortKey)}
-    >
-      <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start'}`}>
-        {label}
-        <span className="text-slate-400">
-          {isSorted ? (
-            currentSort.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />
-          ) : (
-            <ArrowUpDown size={12} className="opacity-0 group-hover:opacity-50" />
-          )}
-        </span>
-      </div>
+    <th className={`px-2 py-2 font-semibold whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors group select-none text-${align}`} onClick={() => onSort(sortKey)}>
+      <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start'}`}>{label}<span className="text-slate-400">{isSorted ? (currentSort.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : (<ArrowUpDown size={12} className="opacity-0 group-hover:opacity-50" />)}</span></div>
     </th>
   );
 };
@@ -196,15 +190,7 @@ const SortableHeader = ({ label, sortKey, currentSort, onSort, align = 'left' })
 const PipeProgress = ({ label, count, colorClass, barColor }) => {
     const percentage = Math.min((count / 15) * 100, 100);
     return (
-        <div className="flex flex-col w-full">
-            <div className="flex justify-between items-end mb-1">
-                <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">{label}</span>
-                <span className={`text-sm font-bold ${colorClass}`}>{count}</span>
-            </div>
-            <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                <div className={`h-full rounded-full transition-all duration-500 ease-out ${barColor}`} style={{ width: `${percentage}%` }} />
-            </div>
-        </div>
+        <div className="flex flex-col w-full"><div className="flex justify-between items-end mb-1"><span className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">{label}</span><span className={`text-sm font-bold ${colorClass}`}>{count}</span></div><div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden"><div className={`h-full rounded-full transition-all duration-500 ease-out ${barColor}`} style={{ width: `${percentage}%` }} /></div></div>
     );
 };
 
@@ -237,16 +223,14 @@ function MigrationDashboard() {
       setIsLoading(true);
       try {
         const token = await getToken();
-        const response = await fetch('/api/getData', {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        const response = await fetch('/api/getData', { headers: { Authorization: `Bearer ${token}` } });
         const json = await response.json();
         setDebugData(json);
 
         if (!response.ok) throw new Error(json.error || `Erreur API`);
         
-        if (json.backoffice) setBackofficeData(json.backoffice); 
-        if (json.encours) setEncoursData(json.encours);
+        if (Array.isArray(json.backoffice)) setBackofficeData(json.backoffice); 
+        if (Array.isArray(json.encours)) setEncoursData(json.encours);
         setIsLoading(false);
       } catch (err) {
         console.error("❌ Erreur API :", err);
@@ -257,11 +241,11 @@ function MigrationDashboard() {
     fetchData();
   }, [getToken]);
   
-  // --- TRAITEMENT CORE (LOGIQUE DE SOUSTRACTION/ABSORPTION) ---
+  // --- TRAITEMENT CORE (LOGIQUE DE SOUSTRACTION/ABSORPTION ROBUSTE) ---
 
   const { detailedData, eventsData, planningCount, analysisPipeCount, availableMonths } = useMemo(() => {
-    // Protection contre plantage si données vides
-    if (!Array.isArray(backofficeData) || (backofficeData.length === 0 && encoursData.length === 0)) {
+    // Si pas de données, on sort direct pour éviter les crashs
+    if (!backofficeData || backofficeData.length === 0) {
         return { detailedData: [], eventsData: [], planningCount: 0, analysisPipeCount: 0, availableMonths: [] };
     }
 
@@ -270,29 +254,23 @@ function MigrationDashboard() {
         const monthlyStats = new Map();
         const monthsSet = new Set(); 
 
-        // --- ÉTAPE 1 : PRÉ-TRAITEMENT ---
+        // --- ÉTAPE 1 : PRÉ-TRAITEMENT ET NORMALISATION ---
         let allEvents = [];
 
-        const allowedNeedEvents = [
-            'Avocatmail - Analyse', 
-            'Migration messagerie Adwin', 
-            'Migration messagerie Adwin - analyse',
-        ];
-
         backofficeData.forEach(row => {
-            const cleanRow = {};
-            Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
+            // NORMALISATION DES CLÉS (CRUCIAL)
+            const cleanRow = normalizeRowKeys(row);
             
             const typeEventRaw = cleanRow['EVENEMENT'] || "";
-            const typeEventLower = typeEventRaw.toLowerCase();
+            const typeEventLower = String(typeEventRaw).toLowerCase();
             
-            // Filtre Global
+            // Filtre de pertinence large
             const isBackoffice = typeEventLower.includes('backoffice') || typeEventLower.includes('back office');
-            const isRelevant = allowedNeedEvents.includes(typeEventRaw) || 
-                            typeEventLower.includes("avocatmail") || 
-                            typeEventLower.includes("adwin") ||
-                            typeEventLower.includes("migration") ||
-                            isBackoffice;
+            const isRelevant = typeEventLower.includes("avocatmail") || 
+                               typeEventLower.includes("adwin") ||
+                               typeEventLower.includes("migration") ||
+                               typeEventLower.includes("analyse") ||
+                               isBackoffice;
 
             if (!isRelevant) return;
 
@@ -301,14 +279,15 @@ function MigrationDashboard() {
             if (!techList.includes(tech)) return;
 
             const dateStr = cleanRow['DATE'];
-            const timeStr = cleanRow['HEURE']; // PEUT ETRE NULL
+            const timeStr = cleanRow['HEURE']; // Peut être null
             const duree = cleanRow['DUREE_HRS'];
             const dateEvent = parseDateSafe(dateStr);
-            if (!dateEvent) return;
+            
+            if (!dateEvent) return; // Si pas de date, on ignore
 
             const duration = calculateDuration(duree);
             
-            // SÉCURITÉ : timeRange sera null si pas d'heure, mais ça ne plantera pas
+            // On tente de calculer la plage horaire (peut retourner null si pas d'heure)
             const timeRange = getEventTimeRange(dateEvent, timeStr, duration);
             
             const dossier = cleanRow['DOSSIER'] || cleanRow['LIBELLE'] || 'Client Inconnu';
@@ -322,7 +301,7 @@ function MigrationDashboard() {
                 typeRaw: typeEventRaw,
                 isBackoffice,
                 duration,
-                timeRange, // Peut être null si pas d'heure
+                timeRange, // {start, end} ou null
                 dossier,
                 nbUsers,
                 netCapacity: 0, 
@@ -348,22 +327,22 @@ function MigrationDashboard() {
 
         // Boucle de collision
         techEvents.forEach(te => {
-            // On cherche un BO compatible
+            // On cherche un BO compatible (Même Tech, Même Jour, ET PLAGES HORAIRES VALIDES)
             const boMatch = boEvents.find(bo => 
                 bo.tech === te.tech && 
                 bo.date === te.date && 
-                bo.timeRange && te.timeRange && // Il faut que les heures soient définies
+                bo.timeRange && te.timeRange && // Condition critique : il faut des heures pour déduire
                 getOverlapHours(bo.timeRange, te.timeRange) > 0
             );
 
             if (boMatch) {
-                // COLLISION TROUVÉE !
+                // COLLISION TROUVÉE -> DÉDUCTION
                 const overlap = getOverlapHours(boMatch.timeRange, te.timeRange);
                 
                 // 1. On réduit la capacité du Backoffice
                 boMatch.netCapacity = Math.max(0, boMatch.netCapacity - overlap);
                 
-                // 2. On annule le besoin de l'événement technique (car absorbé par le temps BO)
+                // 2. On annule le besoin de l'événement technique
                 te.netNeed = 0;
                 te.isAbsorbed = true;
                 te.absorbedBy = boMatch.typeRaw;
@@ -372,7 +351,6 @@ function MigrationDashboard() {
 
         // --- ÉTAPE 3 : GÉNÉRATION DES STATS ET LISTE FINALE ---
         
-        // Helper stats
         const addToStats = (month, tech, besoin, besoin_encours, capacite) => {
             monthsSet.add(month);
             const key = `${month}_${tech}`;
@@ -406,7 +384,7 @@ function MigrationDashboard() {
 
         // Ajout des Tech Events traités
         techEvents.forEach(te => {
-            addToStats(te.month, te.tech, te.netNeed, 0, 0); // Si absorbé, netNeed = 0
+            addToStats(te.month, te.tech, te.netNeed, 0, 0); 
             finalEventsList.push({
                 date: te.date,
                 tech: te.tech,
@@ -414,7 +392,7 @@ function MigrationDashboard() {
                 type: te.typeRaw,
                 duration: te.duration,
                 status: te.isAbsorbed ? 'Planifié (Inclus BO)' : 'Besoin (Analyse/Migr)',
-                color: te.isAbsorbed ? 'slate' : 'cyan', // Gris si absorbé, Cyan sinon
+                color: te.isAbsorbed ? 'slate' : 'cyan', // Gris si absorbé
                 raw_besoin: te.netNeed,
                 raw_capacite: 0,
                 raw_besoin_encours: 0
@@ -427,8 +405,7 @@ function MigrationDashboard() {
 
         if (Array.isArray(encoursData)) {
             encoursData.forEach(row => {
-                const cleanRow = {};
-                Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
+                const cleanRow = normalizeRowKeys(row);
                 const techNameRaw = cleanRow['RESPONSABLE'];
                 const categorie = cleanRow['CATEGORIE'];
                 const reportDateStr = cleanRow['REPORTE_LE'];
@@ -492,7 +469,7 @@ function MigrationDashboard() {
             availableMonths: sortedMonths
         };
     } catch (e) {
-        console.error("Erreur de calcul dans useMemo:", e);
+        console.error("CRITICAL ERROR IN CALCULATION:", e);
         return { detailedData: [], eventsData: [], planningCount: 0, analysisPipeCount: 0, availableMonths: [] };
     }
   }, [backofficeData, encoursData, techList]);
@@ -855,13 +832,10 @@ function MigrationDashboard() {
         )}
       </div>
 
-      {/* --- DEBUG CONSOLE (Rétractable) --- */}
+      {/* --- DEBUG CONSOLE (Rétractable & Robuste) --- */}
       <div className={`fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out ${isDebugOpen ? 'translate-y-0' : 'translate-y-[calc(100%-40px)]'}`}>
         <div className="bg-slate-900 border-t border-slate-700 shadow-2xl flex flex-col h-64">
-            <button 
-                onClick={() => setIsDebugOpen(!isDebugOpen)}
-                className="w-full h-10 bg-slate-800 hover:bg-slate-700 text-white text-xs font-mono flex items-center justify-between px-4 transition-colors cursor-pointer border-b border-slate-700"
-            >
+            <button onClick={() => setIsDebugOpen(!isDebugOpen)} className="w-full h-10 bg-slate-800 hover:bg-slate-700 text-white text-xs font-mono flex items-center justify-between px-4 transition-colors cursor-pointer border-b border-slate-700">
                 <div className="flex items-center gap-2">
                     <Terminal size={14} className="text-green-400" />
                     <span>CONSOLE DEBUG : SNOWFLAKE DATA</span>
@@ -874,13 +848,13 @@ function MigrationDashboard() {
                 {isDebugOpen ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
             </button>
             <div className="flex-1 overflow-auto p-4 font-mono text-xs text-green-400 bg-slate-950">
-                {debugData ? (
-                    <pre>{JSON.stringify(debugData, null, 2)}</pre>
-                ) : (
-                    <div className="flex items-center gap-2 text-slate-500">
-                        <Activity size={14} className="animate-spin" /> Chargement des données...
+                {/* On affiche les clés de la 1ère ligne pour debugger les noms de colonnes */}
+                {debugData && !debugData.error && debugData.backoffice && debugData.backoffice.length > 0 && (
+                    <div className="mb-2 p-2 bg-slate-800 rounded border border-slate-700 text-blue-300">
+                        <strong>Clés détectées (1ère ligne):</strong> {JSON.stringify(Object.keys(debugData.backoffice[0]))}
                     </div>
                 )}
+                {debugData ? (<pre>{JSON.stringify(debugData, null, 2)}</pre>) : (<div className="flex items-center gap-2 text-slate-500"><Activity size={14} className="animate-spin" /> Chargement des données...</div>)}
             </div>
         </div>
       </div>
