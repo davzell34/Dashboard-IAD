@@ -212,6 +212,8 @@ function MigrationDashboard() {
           headers: { Authorization: `Bearer ${token}` }
         });
         const json = await response.json();
+        
+        // Sauvegarde des données brutes pour le debug
         setDebugData(json);
 
         if (!response.ok) throw new Error(json.error || `Erreur API`);
@@ -221,14 +223,14 @@ function MigrationDashboard() {
         setIsLoading(false);
       } catch (err) {
         console.error("❌ Erreur API :", err);
-        setDebugData({ error: err.message });
+        setDebugData({ error: err.message }); // Capture l'erreur pour la console
         setIsLoading(false);
       }
     };
     fetchData();
   }, [getToken]);
   
-  // --- TRAITEMENT CORE (Avec logique de déduction) ---
+  // --- TRAITEMENT CORE ---
 
   const { detailedData, eventsData, planningCount, analysisPipeCount, availableMonths } = useMemo(() => {
     if (backofficeData.length === 0 && encoursData.length === 0) {
@@ -240,34 +242,50 @@ function MigrationDashboard() {
     const monthlyStats = new Map();
     const monthsSet = new Set(); 
 
-    // --- LOGIQUE DE DÉDUCTION (NOUVEAU) ---
-    // On crée une Map pour savoir combien de temps "Technique" est planifié chaque jour pour chaque tech
-    const dailyTechWorkLoad = new Map();
+    const deductionsMap = new Map();
+    
+    // --- 1. INDEXATION DES CRENEAUX BACKOFFICE ---
+    const techBackofficeSchedule = {}; 
 
-    // PASSE 1 : Calculer la charge de travail technique (Interventions, Migrations...)
     backofficeData.forEach(row => {
-        const typeEvent = row['EVENEMENT'];
-        // Si ce N'EST PAS du backoffice, c'est du travail qui consomme du temps
-        if (typeEvent && !typeEvent.includes('backoffice')) {
-            const dateStr = row['DATE'];
-            const resp = row['RESPONSABLE'];
-            const duree = row['DUREE_HRS'];
-            
-            if (!dateStr || !resp) return;
-            const tech = normalizeTechName(resp, techList);
-            if (!techList.includes(tech)) return;
+        const cleanRow = {};
+        Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
+        
+        const typeEvent = cleanRow['EVENEMENT'];
+        const dateStr = cleanRow['DATE'];
+        const timeStr = cleanRow['HEURE'];
+        const resp = cleanRow['RESPONSABLE'];
+        const duree = cleanRow['DUREE_HRS'];
 
-            const dateEvent = parseDateSafe(dateStr);
-            if (!dateEvent) return;
-            const dateKey = dateEvent.toISOString().split('T')[0];
-            
-            // Clé unique : Date + Tech
-            const key = `${dateKey}_${tech}`;
-            const duration = calculateDuration(duree);
-            
-            const currentLoad = dailyTechWorkLoad.get(key) || 0;
-            dailyTechWorkLoad.set(key, currentLoad + duration);
+        if (!dateStr || !resp) return;
+        const tech = normalizeTechName(resp, techList);
+        
+        // FILTRE STRICT
+        if (!techList.includes(tech)) return;
+
+        const dateEvent = parseDateSafe(dateStr);
+        if(!dateEvent) return;
+        
+        const dateKey = dateEvent.toISOString().split('T')[0];
+        
+        // A. Indexation des créneaux
+        if (typeEvent === 'Tache de backoffice Avocatmail') {
+            if (!techBackofficeSchedule[tech]) techBackofficeSchedule[tech] = [];
+            techBackofficeSchedule[tech].push(dateEvent.getTime()); 
         }
+        
+        // B. Calcul des Déductions
+        if (typeEvent !== 'Tache de backoffice Avocatmail' && timeStr) {
+            const timeKey = timeStr.substring(0, 5); 
+            const key = `${dateKey}_${timeKey}_${tech}`;
+            const duration = calculateDuration(duree);
+            const currentDeduction = deductionsMap.get(key) || 0;
+            deductionsMap.set(key, currentDeduction + duration);
+        }
+    });
+
+    Object.keys(techBackofficeSchedule).forEach(t => {
+        techBackofficeSchedule[t].sort((a, b) => a - b);
     });
 
     let countReadyMiseEnPlace = 0;
@@ -286,7 +304,8 @@ function MigrationDashboard() {
         entry.capacite += capacite;
     };
 
-    // PASSE 2 : Génération des événements avec calcul de capacité nette
+    // 2. BACKOFFICE (TRAITEMENT PRINCIPAL)
+    // IMPORTANT : On ajoute ici les filtres pour les événements de la nouvelle vue
     const allowedNeedEvents = [
         'Avocatmail - Analyse', 
         'Migration messagerie Adwin', 
@@ -300,16 +319,18 @@ function MigrationDashboard() {
 
       const typeEvent = cleanRow['EVENEMENT'];
       const dateStr = cleanRow['DATE'];
+      const timeStr = cleanRow['HEURE'];
       const resp = cleanRow['RESPONSABLE'];
       const duree = cleanRow['DUREE_HRS'];
       const dossier = cleanRow['DOSSIER'] || cleanRow['LIBELLE'] || 'Client Inconnu';
-      const nbUsers = cleanRow['NB_USERS'] || cleanRow['USER'] || '1'; 
+      const nbUsers = cleanRow['NB_USERS'] || cleanRow['USER'] || '1'; // Adaptation possible
 
       if (!typeEvent) return;
       
+      // Filtrage partiel : on vérifie si l'événement contient des mots clés si le nom exact ne matche pas
+      // C'est une sécurité pour la nouvelle vue
       const isRelevant = allowedNeedEvents.includes(typeEvent) || 
-                         (typeEvent.includes("Avocatmail") && typeEvent.includes("Analyse")) ||
-                         typeEvent.includes("Backoffice") || typeEvent.includes("backoffice"); // Assure de prendre le backoffice
+                         (typeEvent.includes("Avocatmail") && typeEvent.includes("Analyse"));
 
       if (!isRelevant) return;
       
@@ -324,25 +345,17 @@ function MigrationDashboard() {
       const duration = calculateDuration(duree);
 
       let besoin = 0; let capacite = 0; let color = 'gray'; let status = '';
-      let displayDuration = duration; // La durée affichée dans le tableau (durée réelle)
 
-      // LOGIQUE CŒUR : DISTINCTION BACKOFFICE vs BESOIN
-      if (typeEvent.toLowerCase().includes('backoffice')) {
-        // C'est de la CAPACITÉ
-        // On vérifie s'il y a du travail technique ce jour-là à déduire
-        const key = `${dateFormatted}_${tech}`;
-        const workOnSameDay = dailyTechWorkLoad.get(key) || 0;
+      if (typeEvent === 'Tache de backoffice Avocatmail') {
+        const timeKey = timeStr ? timeStr.substring(0, 5) : '';
+        const key = `${dateFormatted}_${timeKey}_${tech}`;
+        const deduction = deductionsMap.get(key) || 0;
         
-        // La capacité réelle = Durée Backoffice - Durée des interventions techniques du jour
-        capacite = Math.max(0, duration - workOnSameDay);
-        
-        // Pour l'affichage graphique/stats, on utilise la capacité NETTE
-        // Mais dans le tableau détail, on garde la durée brute planifiée (displayDuration)
-        
+        capacite = Math.max(0, duration - deduction);
         color = 'purple';
-        status = `Production BO (Net: ${capacite.toFixed(1)}h)`;
+        status = 'Production (Backoffice)';
       } else {
-        // C'est un BESOIN (Intervention technique)
+        // C'est un besoin
         const users = parseInt(nbUsers, 10) || 1;
         besoin = 1.0;
         if (users > 5) besoin += (users - 5) * (10/60);
@@ -357,19 +370,19 @@ function MigrationDashboard() {
         tech,
         client: dossier,
         type: typeEvent,
-        duration: displayDuration, // Affiche la vraie durée planifiée dans le tableau
+        duration: Math.max(besoin, capacite), 
         status,
         color,
         raw_besoin: besoin,
-        raw_capacite: capacite, // Pour les graphiques, utilise la capacité nette
+        raw_capacite: capacite,
         raw_besoin_encours: 0
       });
     });
 
-    // 3. ENCOURS (Inchangé)
+    // 3. ENCOURS (LOGIQUE GLISSANTE + CHARGE PONDÉRÉE)
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const techBackofficeSchedule = {}; // Simplifié pour cet exemple si non utilisé pour glissement complexe
+    const todayTime = today.getTime();
 
     encoursData.forEach(row => {
         const cleanRow = {};
@@ -399,26 +412,55 @@ function MigrationDashboard() {
             });
         }
 
+        const reportDate = parseDateSafe(reportDateStr);
+        let targetDate = null;
+        let status = "";
+        let color = "";
+        let isReported = false;
+
+        // CALCUL DE LA CHARGE RESTANTE
         const remainingLoad = getRemainingLoad(categorie);
+
         if (remainingLoad <= 0) return;
 
-        const reportDate = parseDateSafe(reportDateStr);
-        // Si pas de date, on simule pour stats mensuelles sur mois courant
-        const targetDate = reportDate || new Date(); 
-        const targetDateStr = targetDate.toISOString().split('T')[0];
-        const targetMonth = targetDateStr.substring(0, 7);
+        // CAS 1 : DATE DE REPORT FORCÉE
+        if (reportDate) {
+            targetDate = reportDate;
+            status = "Reporté";
+            color = "red";
+            isReported = true;
+        } 
+        // CAS 2 : GLISSEMENT SUR PROCHAIN CRÉNEAU
+        else {
+            const techSlots = techBackofficeSchedule[tech] || [];
+            const targetSlotTime = techSlots.find(t => t >= todayTime);
 
-        addToStats(targetMonth, tech, 0, remainingLoad, 0);
+            if (targetSlotTime) {
+                targetDate = new Date(targetSlotTime);
+                status = "Auto (Prochain BO)";
+                color = "amber";
+            } else {
+                targetDate = new Date(today);
+                targetDate.setDate(today.getDate() + 7);
+                status = "En attente (Pas de BO dispo)";
+                color = "slate";
+            }
+        }
 
-        if (reportDate) { // On n'affiche dans la liste que ceux qui ont une date de report
+        if (targetDate) {
+            const targetDateStr = targetDate.toISOString().split('T')[0];
+            const targetMonth = targetDateStr.substring(0, 7);
+
+            addToStats(targetMonth, tech, 0, remainingLoad, 0);
+
             events.push({
                 date: targetDateStr,
                 tech,
                 client: clientName,
                 type: `Encours (${categorie || "Non classé"})`,
                 duration: remainingLoad,
-                status: "Reporté",
-                color: "red",
+                status: status,
+                color: color,
                 raw_besoin: 0,
                 raw_capacite: 0,
                 raw_besoin_encours: remainingLoad
