@@ -6,7 +6,7 @@ import {
 import { 
   Activity, Users, Clock, TrendingUp, AlertTriangle, CheckCircle, 
   Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Loader,
-  ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout, Search, Layers, Server, FileSearch
+  ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout, Search, Layers, Server, FileSearch, Terminal
 } from 'lucide-react';
 import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
 
@@ -27,6 +27,7 @@ const normalizeTechName = (name, techList) => {
   if (!name || typeof name !== 'string') return "Inconnu";
   const cleanName = name.trim();
   const upperName = cleanName.toUpperCase();
+  
   for (const tech of techList) {
     if (tech.toUpperCase() === upperName) return tech;
     const lastName = tech.split(' ').pop().toUpperCase();
@@ -194,6 +195,10 @@ function MigrationDashboard() {
   const [isTableExpanded, setIsTableExpanded] = useState(false); 
   const [isTechChartExpanded, setIsTechChartExpanded] = useState(false); 
 
+  // --- DEBUG STATE ---
+  const [debugData, setDebugData] = useState(null);
+  const [isDebugOpen, setIsDebugOpen] = useState(false);
+
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
 
   const { getToken } = useAuth(); 
@@ -206,14 +211,19 @@ function MigrationDashboard() {
         const response = await fetch('/api/getData', {
           headers: { Authorization: `Bearer ${token}` }
         });
-        if (!response.ok) throw new Error(`Erreur API`);
         const json = await response.json();
+        
+        // Sauvegarde des données brutes pour le debug
+        setDebugData(json);
+
+        if (!response.ok) throw new Error(json.error || `Erreur API`);
         
         if (json.backoffice) setBackofficeData(json.backoffice); 
         if (json.encours) setEncoursData(json.encours);
         setIsLoading(false);
       } catch (err) {
         console.error("❌ Erreur API :", err);
+        setDebugData({ error: err.message }); // Capture l'erreur pour la console
         setIsLoading(false);
       }
     };
@@ -250,6 +260,7 @@ function MigrationDashboard() {
         if (!dateStr || !resp) return;
         const tech = normalizeTechName(resp, techList);
         
+        // FILTRE STRICT
         if (!techList.includes(tech)) return;
 
         const dateEvent = parseDateSafe(dateStr);
@@ -294,12 +305,12 @@ function MigrationDashboard() {
     };
 
     // 2. BACKOFFICE (TRAITEMENT PRINCIPAL)
-    // Liste des événements considérés comme du "Besoin"
+    // IMPORTANT : On ajoute ici les filtres pour les événements de la nouvelle vue
     const allowedNeedEvents = [
         'Avocatmail - Analyse', 
         'Migration messagerie Adwin', 
-        'Migration messagerie Adwin - analyse', // NOUVEAU NOM
-        'Tache de backoffice Avocatmail' // Lui c'est de la capa
+        'Migration messagerie Adwin - analyse',
+        'Tache de backoffice Avocatmail' 
     ];
 
     backofficeData.forEach(row => {
@@ -312,9 +323,16 @@ function MigrationDashboard() {
       const resp = cleanRow['RESPONSABLE'];
       const duree = cleanRow['DUREE_HRS'];
       const dossier = cleanRow['DOSSIER'] || cleanRow['LIBELLE'] || 'Client Inconnu';
-      const nbUsers = cleanRow['USER'] || cleanRow['NB_USERS'] || '1';
+      const nbUsers = cleanRow['NB_USERS'] || cleanRow['USER'] || '1'; // Adaptation possible
 
-      if (!typeEvent || !allowedNeedEvents.includes(typeEvent)) return;
+      if (!typeEvent) return;
+      
+      // Filtrage partiel : on vérifie si l'événement contient des mots clés si le nom exact ne matche pas
+      // C'est une sécurité pour la nouvelle vue
+      const isRelevant = allowedNeedEvents.includes(typeEvent) || 
+                         (typeEvent.includes("Avocatmail") && typeEvent.includes("Analyse"));
+
+      if (!isRelevant) return;
       
       const tech = normalizeTechName(resp, techList);
       if (!techList.includes(tech)) return;
@@ -337,8 +355,8 @@ function MigrationDashboard() {
         color = 'purple';
         status = 'Production (Backoffice)';
       } else {
-        // C'est un besoin (Analyse ou Migration, ancien ou nouveau nom)
-        const users = parseInt(nbUsers, 10);
+        // C'est un besoin
+        const users = parseInt(nbUsers, 10) || 1;
         besoin = 1.0;
         if (users > 5) besoin += (users - 5) * (10/60);
         color = 'cyan';
@@ -609,7 +627,7 @@ function MigrationDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500">
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500 relative">
       
       {/* HEADER */}
       <header className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
@@ -749,7 +767,7 @@ function MigrationDashboard() {
                     <td className="px-2 py-1 font-medium text-slate-700 whitespace-nowrap truncate max-w-[200px]" title={event.client}>{event.client}</td>
                     <td className="px-2 py-1 text-slate-500 whitespace-nowrap">{event.type}</td>
                     <td className="px-2 py-1 text-right font-medium whitespace-nowrap">{event.duration > 0 ? event.duration.toFixed(2) : '-'}</td>
-                    <td className="px-2 py-1 text-center whitespace-nowrap"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${event.color === 'cyan' ? 'bg-cyan-100 text-cyan-700' : event.color === 'purple' ? 'bg-purple-100 text-purple-700' : event.color === 'indigo' ? 'bg-indigo-100 text-indigo-700' : event.color === 'amber' ? 'bg-amber-100 text-amber-700' : event.color === 'red' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>{event.status}</span></td>
+                    <td className="px-2 py-1 text-center whitespace-nowrap"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${event.color === 'cyan' ? 'bg-cyan-100 text-cyan-700' : event.color === 'purple' ? 'bg-purple-100 text-purple-700' : event.color === 'indigo' ? 'bg-indigo-100 text-indigo-700' : event.color === 'amber' ? 'bg-amber-100 text-amber-700' : event.color === 'red' ? 'bg-red-100 text-red-700' : event.color === 'slate' ? 'bg-slate-200 text-slate-600' : 'bg-blue-100 text-blue-700'}`}>{event.status}</span></td>
                   </tr>
                 ))}
                 {filteredAndSortedEvents.length === 0 && (<tr><td colSpan="6" className="px-4 py-8 text-center text-slate-400 italic">Aucun événement trouvé.</td></tr>)}
@@ -787,7 +805,7 @@ function MigrationDashboard() {
       </div>
 
       {/* TABLEAU MENSUEL */}
-      <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden mb-8">
+      <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden mb-16">
         <button onClick={() => setIsTableExpanded(!isTableExpanded)} className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors">
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2"><TableIcon className="w-4 h-4 text-slate-400" />Résultats Mensuels Détaillés (Globaux)</h2>
           {isTableExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
@@ -818,6 +836,36 @@ function MigrationDashboard() {
             </table>
           </div>
         )}
+      </div>
+
+      {/* --- DEBUG CONSOLE (Rétractable) --- */}
+      <div className={`fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out ${isDebugOpen ? 'translate-y-0' : 'translate-y-[calc(100%-40px)]'}`}>
+        <div className="bg-slate-900 border-t border-slate-700 shadow-2xl flex flex-col h-64">
+            <button 
+                onClick={() => setIsDebugOpen(!isDebugOpen)}
+                className="w-full h-10 bg-slate-800 hover:bg-slate-700 text-white text-xs font-mono flex items-center justify-between px-4 transition-colors cursor-pointer border-b border-slate-700"
+            >
+                <div className="flex items-center gap-2">
+                    <Terminal size={14} className="text-green-400" />
+                    <span>CONSOLE DEBUG : SNOWFLAKE DATA</span>
+                    {debugData && (
+                        <span className={`px-2 py-0.5 rounded text-[10px] ${debugData.error ? 'bg-red-900 text-red-300' : 'bg-green-900 text-green-300'}`}>
+                            {debugData.error ? 'ERREUR API' : 'DONNÉES REÇUES'}
+                        </span>
+                    )}
+                </div>
+                {isDebugOpen ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+            </button>
+            <div className="flex-1 overflow-auto p-4 font-mono text-xs text-green-400 bg-slate-950">
+                {debugData ? (
+                    <pre>{JSON.stringify(debugData, null, 2)}</pre>
+                ) : (
+                    <div className="flex items-center gap-2 text-slate-500">
+                        <Activity size={14} className="animate-spin" /> Chargement des données...
+                    </div>
+                )}
+            </div>
+        </div>
       </div>
 
     </div>
