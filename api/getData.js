@@ -2,7 +2,7 @@ import snowflake from 'snowflake-sdk';
 import { verifyToken } from '@clerk/backend';
 
 export default async function handler(req, res) {
-  // 1. Sécurité Clerk (Identique à avant)
+  // --- 1. SÉCURITÉ (Clerk) ---
   const token = req.headers.authorization?.replace('Bearer ', '');
   if (!token) return res.status(401).json({ error: "Non autorisé" });
   try {
@@ -11,7 +11,7 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Token invalide" });
   }
 
-  // 2. Connexion Snowflake
+  // --- 2. CONNEXION SNOWFLAKE ---
   const connection = snowflake.createConnection({
     account: process.env.SNOWFLAKE_ACCOUNT,
     username: process.env.SNOWFLAKE_USERNAME,
@@ -27,31 +27,40 @@ export default async function handler(req, res) {
   });
 
   try {
-    // 3. Requête SQL mise à jour vers V_EVENEMENT_TECHNIQUE
-    // J'utilise des ALIAS (AS) pour garantir que le Frontend reçoive les bonnes clés
-    // même si la nouvelle vue a des noms légèrement différents.
+    // --- 3. REQUÊTE SQL OPTIMISÉE ---
     const query = `
       SELECT 
         DATE, 
         HEURE, 
         RESPONSABLE, 
-        EVENEMENT,       -- Assurez-vous que cette colonne contient bien "Avocatmail - Analyse", etc.
+        EVENEMENT, 
         DUREE_HRS, 
-        LIBELLE AS DOSSIER, -- Adaptation possible si la colonne s'appelle LIBELLE dans la nouvelle vue
+        LIBELLE AS DOSSIER, -- Alias pour correspondre au code Frontend
         NB_USERS 
       FROM V_EVENEMENT_TECHNIQUE
       WHERE 
-        -- Optimisation : On ne charge pas tout l'historique inutilement
-        DATE >= DATEADD(month, -12, CURRENT_DATE()) 
+        -- 1. Filtre Temporel (2025 et 2026 uniquement)
+        DATE >= '2025-01-01' AND DATE <= '2026-12-31'
+        
+        -- 2. Filtre Techniciens (Liste spécifique)
+        -- Utilisation de ILIKE pour gérer les majuscules/minuscules et l'ordre Nom/Prénom
         AND (
-            -- Filtre SQL optionnel pour alléger le transfert de données
-            EVENEMENT ILIKE '%Avocatmail%' 
-            OR EVENEMENT ILIKE '%Adwin%'
-            OR EVENEMENT ILIKE '%Migration%'
+             RESPONSABLE ILIKE '%AYAT%Zakaria%' OR RESPONSABLE ILIKE '%Zakaria%AYAT%'
+          OR RESPONSABLE ILIKE '%MESSIN%Jean-Michel%' OR RESPONSABLE ILIKE '%Jean-Michel%MESSIN%'
+          OR RESPONSABLE ILIKE '%GROSSI%Mathieu%' OR RESPONSABLE ILIKE '%Mathieu%GROSSI%'
+          OR RESPONSABLE ILIKE '%SAUROIS%Jean-Philippe%' OR RESPONSABLE ILIKE '%Jean-Philippe%SAUROIS%'
+          OR RESPONSABLE ILIKE '%GAMONDES%Roderick%' OR RESPONSABLE ILIKE '%Roderick%GAMONDES%'
+        )
+
+        -- 3. Filtre Pertinence (On ne charge que les events liés aux migrations)
+        AND (
+             EVENEMENT ILIKE '%Avocatmail%' 
+          OR EVENEMENT ILIKE '%Adwin%'
+          OR EVENEMENT ILIKE '%Migration%'
         )
     `;
 
-    // Récupération Backoffice
+    // Exécution Backoffice
     const backofficeData = await new Promise((resolve, reject) => {
       connection.execute({
         sqlText: query,
@@ -59,9 +68,19 @@ export default async function handler(req, res) {
       });
     });
 
-    // Récupération Encours (Reste probablement inchangé, ou pointe vers la même vue ?)
-    // Si l'encours est une autre vue (ex: V_TICKETS_ENCOURS), on la laisse telle quelle.
-    const encoursQuery = `SELECT * FROM V_TICKETS_ENCOURS_AVOCATMAIL`; 
+    // Exécution Encours (Vous pouvez garder l'ancienne vue ou adapter selon vos besoins)
+    // J'ajoute un filtre basique sur RESPONSABLE ici aussi pour être cohérent
+    const encoursQuery = `
+        SELECT * FROM V_TICKETS_ENCOURS_AVOCATMAIL
+        WHERE (
+             RESPONSABLE ILIKE '%AYAT%' 
+          OR RESPONSABLE ILIKE '%MESSIN%' 
+          OR RESPONSABLE ILIKE '%GROSSI%' 
+          OR RESPONSABLE ILIKE '%SAUROIS%' 
+          OR RESPONSABLE ILIKE '%GAMONDES%'
+        )
+    `; 
+    
     const encoursData = await new Promise((resolve, reject) => {
       connection.execute({
         sqlText: encoursQuery,
@@ -75,7 +94,6 @@ export default async function handler(req, res) {
     console.error("Snowflake Error:", error);
     res.status(500).json({ error: "Erreur serveur Snowflake" });
   } finally {
-    // Si la connexion reste ouverte trop longtemps, Vercel peut timer out
-    // connection.destroy(); // Décommenter si besoin
+    // Optionnel : connection.destroy();
   }
 }
