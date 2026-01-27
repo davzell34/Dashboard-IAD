@@ -39,7 +39,7 @@ export default async function handler(req, res) {
         -- pour que le reste du code comprenne.
         "USER" AS NB_USERS 
 
-      FROM V_EVENEMENT_TECHNIQUE
+      FROM V_EVENEMENT_AVOCATMAIL
       WHERE 
         DATE >= '2025-01-01' AND DATE <= '2026-12-31'
         AND (
