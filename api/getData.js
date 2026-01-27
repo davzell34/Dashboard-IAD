@@ -54,7 +54,7 @@ export default async function handler(request, response) {
         // --- REQUÊTE 1 : BACKOFFICE ---
         const sqlBackoffice = `
             SELECT DATE, HEURE, DUREE_HRS, RESPONSABLE, DOSSIER, LIBELLE, EVENEMENT, NUMDOSSIER, "USER"
-            FROM V_EVENEMENT_AVOCATMAIL
+            FROM V_EVENEMENT_TECHNIQUE
             WHERE DATE >= '2025-01-01' AND DATE <= '2026-12-31'
             ORDER BY DATE DESC
         `;
