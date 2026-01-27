@@ -104,30 +104,6 @@ const calculateDuration = (duree) => {
     return 0;
 };
 
-// --- GESTION DES PLAGES HORAIRES ---
-const getEventTimeRange = (dateObj, timeStr, durationHrs) => {
-    if (!dateObj || !timeStr) return null;
-    
-    const [h, m] = timeStr.split(':').map(Number);
-    if (isNaN(h)) return null; 
-
-    const start = new Date(dateObj);
-    start.setHours(h, m || 0, 0, 0);
-    
-    const end = new Date(start);
-    end.setMinutes(start.getMinutes() + (durationHrs * 60));
-    
-    return { start: start.getTime(), end: end.getTime() };
-};
-
-const getOverlapHours = (range1, range2) => {
-    if (!range1 || !range2) return 0;
-    const start = Math.max(range1.start, range2.start);
-    const end = Math.min(range1.end, range2.end);
-    if (end <= start) return 0;
-    return (end - start) / (1000 * 60 * 60); 
-};
-
 // --- CALCUL AVANCEMENT ---
 const getRemainingLoad = (categorie) => {
     if (!categorie) return 0.5; 
@@ -236,6 +212,8 @@ function MigrationDashboard() {
           headers: { Authorization: `Bearer ${token}` }
         });
         const json = await response.json();
+        
+        // Sauvegarde des données brutes pour le debug
         setDebugData(json);
 
         if (!response.ok) throw new Error(json.error || `Erreur API`);
@@ -245,131 +223,75 @@ function MigrationDashboard() {
         setIsLoading(false);
       } catch (err) {
         console.error("❌ Erreur API :", err);
-        setDebugData({ error: err.message });
+        setDebugData({ error: err.message }); // Capture l'erreur pour la console
         setIsLoading(false);
       }
     };
     fetchData();
   }, [getToken]);
   
-  // --- TRAITEMENT CORE (LOGIQUE DE SOUSTRACTION/ABSORPTION STRICTE) ---
+  // --- TRAITEMENT CORE ---
 
   const { detailedData, eventsData, planningCount, analysisPipeCount, availableMonths } = useMemo(() => {
     if (backofficeData.length === 0 && encoursData.length === 0) {
         return { detailedData: [], eventsData: [], planningCount: 0, analysisPipeCount: 0, availableMonths: [] };
     }
 
+    const events = [];
     const planningEventsList = [];
     const monthlyStats = new Map();
     const monthsSet = new Set(); 
 
-    // --- ÉTAPE 1 : PRÉ-TRAITEMENT ET TYPAGE ---
-    // On transforme les données brutes en objets enrichis avec ID, dates, et indicateurs
-    let allEvents = [];
-
-    const allowedNeedEvents = [
-        'Avocatmail - Analyse', 
-        'Migration messagerie Adwin', 
-        'Migration messagerie Adwin - analyse',
-    ];
+    const deductionsMap = new Map();
+    
+    // --- 1. INDEXATION DES CRENEAUX BACKOFFICE ---
+    const techBackofficeSchedule = {}; 
 
     backofficeData.forEach(row => {
         const cleanRow = {};
         Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
         
-        const typeEventRaw = cleanRow['EVENEMENT'] || "";
-        const typeEventLower = typeEventRaw.toLowerCase();
-        
-        // 1. DÉTECTION DU TYPE
-        const isBackoffice = typeEventLower.includes('backoffice') || typeEventLower.includes('back office');
-        const isRelevant = allowedNeedEvents.includes(typeEventRaw) || 
-                           typeEventLower.includes("avocatmail") || 
-                           typeEventLower.includes("adwin") ||
-                           typeEventLower.includes("migration") ||
-                           isBackoffice;
-
-        if (!isRelevant) return;
-
+        const typeEvent = cleanRow['EVENEMENT'];
+        const dateStr = cleanRow['DATE'];
+        const timeStr = cleanRow['HEURE'];
         const resp = cleanRow['RESPONSABLE'];
+        const duree = cleanRow['DUREE_HRS'];
+
+        if (!dateStr || !resp) return;
         const tech = normalizeTechName(resp, techList);
+        
+        // FILTRE STRICT
         if (!techList.includes(tech)) return;
 
-        const dateStr = cleanRow['DATE'];
-        const timeStr = cleanRow['HEURE']; 
-        const duree = cleanRow['DUREE_HRS'];
         const dateEvent = parseDateSafe(dateStr);
-        if (!dateEvent) return;
-
-        const duration = calculateDuration(duree);
-        const timeRange = getEventTimeRange(dateEvent, timeStr, duration);
-        const dossier = cleanRow['DOSSIER'] || cleanRow['LIBELLE'] || 'Client Inconnu';
-        const nbUsers = cleanRow['NB_USERS'] || cleanRow['USER'] || '1';
-
-        allEvents.push({
-            id: Math.random(), // ID unique pour gestion
-            date: dateEvent.toISOString().split('T')[0],
-            month: dateEvent.toISOString().split('T')[0].substring(0, 7),
-            tech,
-            typeRaw: typeEventRaw,
-            isBackoffice,
-            duration,
-            timeRange, // { start, end } ou null si pas d'heure
-            dossier,
-            nbUsers,
-            
-            // CHAMPS CALCULÉS (Initialisation)
-            netCapacity: 0, 
-            netNeed: 0,
-            isAbsorbed: false, // Sera true si l'événement est mangé par un backoffice
-            status: '',
-            color: ''
-        });
-    });
-
-    // --- ÉTAPE 2 : CALCUL DES COLLISIONS (ABSORPTION) ---
-    // On sépare pour comparer facilement
-    const boEvents = allEvents.filter(e => e.isBackoffice);
-    const techEvents = allEvents.filter(e => !e.isBackoffice);
-
-    // Initialisation des valeurs par défaut
-    boEvents.forEach(bo => bo.netCapacity = bo.duration); 
-    
-    techEvents.forEach(te => {
-        // Calcul du besoin théorique (forfait ou durée réelle)
-        const users = parseInt(te.nbUsers, 10) || 1;
-        let baseNeed = 1.0;
-        if (users > 5) baseNeed += (users - 5) * (10/60);
-        te.netNeed = Math.max(te.duration, baseNeed);
-        te.isAbsorbed = false;
-    });
-
-    // BOUCLE DE DÉTECTION DES CHEVAUCHEMENTS
-    techEvents.forEach(te => {
-        // On cherche un événement Backoffice qui couvre cet événement technique
-        // Conditions : Même Tech, Même Jour, Heures définies, Chevauchement > 0
-        const boMatch = boEvents.find(bo => 
-            bo.tech === te.tech && 
-            bo.date === te.date && 
-            bo.timeRange && te.timeRange && 
-            getOverlapHours(bo.timeRange, te.timeRange) > 0
-        );
-
-        if (boMatch) {
-            // 
-            // LOGIQUE DE DÉDUCTION STRICTE
-            const overlap = getOverlapHours(boMatch.timeRange, te.timeRange);
-            
-            // 1. On réduit la capacité du Backoffice
-            boMatch.netCapacity = Math.max(0, boMatch.netCapacity - overlap);
-            
-            // 2. L'événement technique est absorbé (Il ne compte plus comme besoin)
-            te.netNeed = 0; 
-            te.isAbsorbed = true;
-            te.absorbedBy = boMatch.typeRaw;
+        if(!dateEvent) return;
+        
+        const dateKey = dateEvent.toISOString().split('T')[0];
+        
+        // A. Indexation des créneaux
+        if (typeEvent === 'Tache de backoffice Avocatmail') {
+            if (!techBackofficeSchedule[tech]) techBackofficeSchedule[tech] = [];
+            techBackofficeSchedule[tech].push(dateEvent.getTime()); 
+        }
+        
+        // B. Calcul des Déductions
+        if (typeEvent !== 'Tache de backoffice Avocatmail' && timeStr) {
+            const timeKey = timeStr.substring(0, 5); 
+            const key = `${dateKey}_${timeKey}_${tech}`;
+            const duration = calculateDuration(duree);
+            const currentDeduction = deductionsMap.get(key) || 0;
+            deductionsMap.set(key, currentDeduction + duration);
         }
     });
 
-    // --- ÉTAPE 3 : GÉNÉRATION DE LA LISTE FINALE & STATS ---
+    Object.keys(techBackofficeSchedule).forEach(t => {
+        techBackofficeSchedule[t].sort((a, b) => a - b);
+    });
+
+    let countReadyMiseEnPlace = 0;
+    let countReadyAnalyse = 0; 
+
+    // Helper 
     const addToStats = (month, tech, besoin, besoin_encours, capacite) => {
         monthsSet.add(month);
         const key = `${month}_${tech}`;
@@ -382,51 +304,85 @@ function MigrationDashboard() {
         entry.capacite += capacite;
     };
 
-    const finalEventsList = [];
+    // 2. BACKOFFICE (TRAITEMENT PRINCIPAL)
+    // IMPORTANT : On ajoute ici les filtres pour les événements de la nouvelle vue
+    const allowedNeedEvents = [
+        'Avocatmail - Analyse', 
+        'Migration messagerie Adwin', 
+        'Migration messagerie Adwin - analyse',
+        'Tache de backoffice Avocatmail' 
+    ];
 
-    // Ajout des Backoffices (avec capacité nette)
-    boEvents.forEach(bo => {
-        addToStats(bo.month, bo.tech, 0, 0, bo.netCapacity);
+    backofficeData.forEach(row => {
+      const cleanRow = {};
+      Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
+
+      const typeEvent = cleanRow['EVENEMENT'];
+      const dateStr = cleanRow['DATE'];
+      const timeStr = cleanRow['HEURE'];
+      const resp = cleanRow['RESPONSABLE'];
+      const duree = cleanRow['DUREE_HRS'];
+      const dossier = cleanRow['DOSSIER'] || cleanRow['LIBELLE'] || 'Client Inconnu';
+      const nbUsers = cleanRow['NB_USERS'] || cleanRow['USER'] || '1'; // Adaptation possible
+
+      if (!typeEvent) return;
+      
+      // Filtrage partiel : on vérifie si l'événement contient des mots clés si le nom exact ne matche pas
+      // C'est une sécurité pour la nouvelle vue
+      const isRelevant = allowedNeedEvents.includes(typeEvent) || 
+                         (typeEvent.includes("Avocatmail") && typeEvent.includes("Analyse"));
+
+      if (!isRelevant) return;
+      
+      const tech = normalizeTechName(resp, techList);
+      if (!techList.includes(tech)) return;
+
+      const dateEvent = parseDateSafe(dateStr);
+      if (!dateEvent) return;
+      
+      const dateFormatted = dateEvent.toISOString().split('T')[0];
+      const month = dateFormatted.substring(0, 7);
+      const duration = calculateDuration(duree);
+
+      let besoin = 0; let capacite = 0; let color = 'gray'; let status = '';
+
+      if (typeEvent === 'Tache de backoffice Avocatmail') {
+        const timeKey = timeStr ? timeStr.substring(0, 5) : '';
+        const key = `${dateFormatted}_${timeKey}_${tech}`;
+        const deduction = deductionsMap.get(key) || 0;
         
-        finalEventsList.push({
-            date: bo.date,
-            tech: bo.tech,
-            client: bo.dossier,
-            type: bo.typeRaw,
-            duration: bo.duration, 
-            // Statut explicite pour comprendre le calcul
-            status: bo.netCapacity < bo.duration 
-                ? `Prod BO (Net: ${bo.netCapacity.toFixed(1)}h)` 
-                : 'Production (Backoffice)',
-            color: 'purple',
-            raw_besoin: 0,
-            raw_capacite: bo.netCapacity,
-            raw_besoin_encours: 0
-        });
+        capacite = Math.max(0, duration - deduction);
+        color = 'purple';
+        status = 'Production (Backoffice)';
+      } else {
+        // C'est un besoin
+        const users = parseInt(nbUsers, 10) || 1;
+        besoin = 1.0;
+        if (users > 5) besoin += (users - 5) * (10/60);
+        color = 'cyan';
+        status = 'Besoin (Analyse/Migr)';
+      }
+
+      addToStats(month, tech, besoin, 0, capacite);
+
+      events.push({
+        date: dateFormatted,
+        tech,
+        client: dossier,
+        type: typeEvent,
+        duration: Math.max(besoin, capacite), 
+        status,
+        color,
+        raw_besoin: besoin,
+        raw_capacite: capacite,
+        raw_besoin_encours: 0
+      });
     });
 
-    // Ajout des Événements Techniques (ceux absorbés ont besoin = 0)
-    techEvents.forEach(te => {
-        addToStats(te.month, te.tech, te.netNeed, 0, 0); 
-        
-        finalEventsList.push({
-            date: te.date,
-            tech: te.tech,
-            client: te.dossier,
-            type: te.typeRaw,
-            duration: te.duration,
-            // Statut explicite si absorbé
-            status: te.isAbsorbed ? 'Planifié (Inclus BO)' : 'Besoin (Analyse/Migr)',
-            color: te.isAbsorbed ? 'slate' : 'cyan', // Gris si absorbé, Cyan sinon
-            raw_besoin: te.netNeed,
-            raw_capacite: 0,
-            raw_besoin_encours: 0
-        });
-    });
-
-    // --- ÉTAPE 4 : GESTION DES ENCOURS (Inchangé) ---
+    // 3. ENCOURS (LOGIQUE GLISSANTE + CHARGE PONDÉRÉE)
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const todayTime = today.getTime();
 
     encoursData.forEach(row => {
         const cleanRow = {};
@@ -456,26 +412,55 @@ function MigrationDashboard() {
             });
         }
 
+        const reportDate = parseDateSafe(reportDateStr);
+        let targetDate = null;
+        let status = "";
+        let color = "";
+        let isReported = false;
+
+        // CALCUL DE LA CHARGE RESTANTE
         const remainingLoad = getRemainingLoad(categorie);
+
         if (remainingLoad <= 0) return;
 
-        const reportDate = parseDateSafe(reportDateStr);
-        // Si pas de date, on place dans le mois courant pour les stats
-        const targetDate = reportDate || new Date(); 
-        const targetDateStr = targetDate.toISOString().split('T')[0];
-        const targetMonth = targetDateStr.substring(0, 7);
+        // CAS 1 : DATE DE REPORT FORCÉE
+        if (reportDate) {
+            targetDate = reportDate;
+            status = "Reporté";
+            color = "red";
+            isReported = true;
+        } 
+        // CAS 2 : GLISSEMENT SUR PROCHAIN CRÉNEAU
+        else {
+            const techSlots = techBackofficeSchedule[tech] || [];
+            const targetSlotTime = techSlots.find(t => t >= todayTime);
 
-        addToStats(targetMonth, tech, 0, remainingLoad, 0);
+            if (targetSlotTime) {
+                targetDate = new Date(targetSlotTime);
+                status = "Auto (Prochain BO)";
+                color = "amber";
+            } else {
+                targetDate = new Date(today);
+                targetDate.setDate(today.getDate() + 7);
+                status = "En attente (Pas de BO dispo)";
+                color = "slate";
+            }
+        }
 
-        if (reportDate) { 
-            finalEventsList.push({
+        if (targetDate) {
+            const targetDateStr = targetDate.toISOString().split('T')[0];
+            const targetMonth = targetDateStr.substring(0, 7);
+
+            addToStats(targetMonth, tech, 0, remainingLoad, 0);
+
+            events.push({
                 date: targetDateStr,
                 tech,
                 client: clientName,
                 type: `Encours (${categorie || "Non classé"})`,
                 duration: remainingLoad,
-                status: "Reporté",
-                color: "red",
+                status: status,
+                color: color,
                 raw_besoin: 0,
                 raw_capacite: 0,
                 raw_besoin_encours: remainingLoad
@@ -488,7 +473,7 @@ function MigrationDashboard() {
 
     return {
         detailedData: detailedDataArray,
-        eventsData: [...planningEventsList, ...finalEventsList],
+        eventsData: [...planningEventsList, ...events],
         planningCount: countReadyMiseEnPlace,
         analysisPipeCount: countReadyAnalyse,
         availableMonths: sortedMonths
