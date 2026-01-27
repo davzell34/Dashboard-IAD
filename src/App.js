@@ -104,6 +104,26 @@ const calculateDuration = (duree) => {
     return 0;
 };
 
+// Helper pour calculer les timestamps de début et fin
+const getRange = (dateObj, timeStr, duration) => {
+    if(!dateObj || !timeStr) return null;
+    const [h, m] = timeStr.split(':').map(Number);
+    if(isNaN(h)) return null;
+    
+    const start = new Date(dateObj);
+    start.setHours(h, m || 0, 0, 0);
+    const end = new Date(start);
+    end.setMinutes(start.getMinutes() + (duration * 60));
+    
+    return { start: start.getTime(), end: end.getTime() };
+};
+
+// Helper pour vérifier le chevauchement
+const checkOverlap = (range1, range2) => {
+    if(!range1 || !range2) return false;
+    return (range1.start < range2.end && range1.end > range2.start);
+};
+
 // --- CALCUL AVANCEMENT ---
 const getRemainingLoad = (categorie) => {
     if (!categorie) return 0.5; 
@@ -243,6 +263,7 @@ function MigrationDashboard() {
     const monthsSet = new Set(); 
 
     const deductionsMap = new Map();
+    const boRanges = []; // Stocke les créneaux de backoffice
     
     // --- 1. INDEXATION DES CRENEAUX BACKOFFICE ---
     const techBackofficeSchedule = {}; 
@@ -267,18 +288,24 @@ function MigrationDashboard() {
         if(!dateEvent) return;
         
         const dateKey = dateEvent.toISOString().split('T')[0];
+        const duration = calculateDuration(duree);
         
-        // A. Indexation des créneaux
+        // A. Indexation des créneaux pour le glissement (ancien code)
         if (typeEvent === 'Tache de backoffice Avocatmail') {
             if (!techBackofficeSchedule[tech]) techBackofficeSchedule[tech] = [];
             techBackofficeSchedule[tech].push(dateEvent.getTime()); 
+
+            // NOUVEAU : On stocke le range précis pour détecter les chevauchements
+            const range = getRange(dateEvent, timeStr, duration);
+            if(range) {
+                boRanges.push({ ...range, tech });
+            }
         }
         
-        // B. Calcul des Déductions
+        // B. Calcul des Déductions (Ancien code, conservé par sécurité)
         if (typeEvent !== 'Tache de backoffice Avocatmail' && timeStr) {
             const timeKey = timeStr.substring(0, 5); 
             const key = `${dateKey}_${timeKey}_${tech}`;
-            const duration = calculateDuration(duree);
             const currentDeduction = deductionsMap.get(key) || 0;
             deductionsMap.set(key, currentDeduction + duration);
         }
@@ -304,8 +331,7 @@ function MigrationDashboard() {
         entry.capacite += capacite;
     };
 
-    // 2. BACKOFFICE (TRAITEMENT PRINCIPAL)
-    // IMPORTANT : On ajoute ici les filtres pour les événements de la nouvelle vue
+    // 2. TRAITEMENT DES EVENEMENTS (Principal)
     const allowedNeedEvents = [
         'Avocatmail - Analyse', 
         'Migration messagerie Adwin', 
@@ -323,16 +349,9 @@ function MigrationDashboard() {
       const resp = cleanRow['RESPONSABLE'];
       const duree = cleanRow['DUREE_HRS'];
       const dossier = cleanRow['DOSSIER'] || cleanRow['LIBELLE'] || 'Client Inconnu';
-      const nbUsers = cleanRow['NB_USERS'] || cleanRow['USER'] || '1'; // Adaptation possible
+      const nbUsers = cleanRow['NB_USERS'] || cleanRow['USER'] || '1'; 
 
       if (!typeEvent) return;
-      
-      // Filtrage partiel : on vérifie si l'événement contient des mots clés si le nom exact ne matche pas
-      // C'est une sécurité pour la nouvelle vue
-      const isRelevant = allowedNeedEvents.includes(typeEvent) || 
-                         (typeEvent.includes("Avocatmail") && typeEvent.includes("Analyse"));
-
-      if (!isRelevant) return;
       
       const tech = normalizeTechName(resp, techList);
       if (!techList.includes(tech)) return;
@@ -344,33 +363,61 @@ function MigrationDashboard() {
       const month = dateFormatted.substring(0, 7);
       const duration = calculateDuration(duree);
 
-      let besoin = 0; let capacite = 0; let color = 'gray'; let status = '';
+      // --- LOGIQUE DE FILTRAGE ---
+      
+      // 1. Est-ce un événement "Officiel" (Backoffice ou Besoin standard) ?
+      const isOfficial = allowedNeedEvents.includes(typeEvent) || 
+                         (typeEvent.includes("Avocatmail") && typeEvent.includes("Analyse"));
 
-      if (typeEvent === 'Tache de backoffice Avocatmail') {
-        const timeKey = timeStr ? timeStr.substring(0, 5) : '';
-        const key = `${dateFormatted}_${timeKey}_${tech}`;
-        const deduction = deductionsMap.get(key) || 0;
-        
-        capacite = Math.max(0, duration - deduction);
-        color = 'purple';
-        status = 'Production (Backoffice)';
-      } else {
-        // C'est un besoin
-        const users = parseInt(nbUsers, 10) || 1;
-        besoin = 1.0;
-        if (users > 5) besoin += (users - 5) * (10/60);
-        color = 'cyan';
-        status = 'Besoin (Analyse/Migr)';
+      // 2. Est-ce un événement qui chevauche un Backoffice (Concurrent) ?
+      let isConcurrent = false;
+      if (!isOfficial) {
+          // Si ce n'est pas officiel, on regarde si ça tombe pendant un BO
+          const range = getRange(dateEvent, timeStr, duration);
+          if (range) {
+              isConcurrent = boRanges.some(bo => bo.tech === tech && checkOverlap(range, bo));
+          }
       }
 
-      addToStats(month, tech, besoin, 0, capacite);
+      // Si ni officiel ni concurrent, on ignore
+      if (!isOfficial && !isConcurrent) return;
+
+      // --- CALCULS (Uniquement si Officiel) ---
+      let besoin = 0; let capacite = 0; let color = 'gray'; let status = '';
+
+      // On ne compte dans les stats que si c'est officiel
+      if (isOfficial) {
+          if (typeEvent === 'Tache de backoffice Avocatmail') {
+            const timeKey = timeStr ? timeStr.substring(0, 5) : '';
+            const key = `${dateFormatted}_${timeKey}_${tech}`;
+            const deduction = deductionsMap.get(key) || 0;
+            
+            capacite = Math.max(0, duration - deduction);
+            color = 'purple';
+            status = 'Production (Backoffice)';
+          } else {
+            // C'est un besoin
+            const users = parseInt(nbUsers, 10) || 1;
+            besoin = 1.0;
+            if (users > 5) besoin += (users - 5) * (10/60);
+            color = 'cyan';
+            status = 'Besoin (Analyse/Migr)';
+          }
+          // On ajoute aux stats uniquement les officiels
+          addToStats(month, tech, besoin, 0, capacite);
+      } else {
+          // C'est un concurrent (Planifié pendant BO)
+          // On ne met RIEN dans les stats (0 besoin, 0 capacité), juste affichage liste
+          color = 'slate'; // Gris pour différencier
+          status = 'Planifié pendant BO';
+      }
 
       events.push({
         date: dateFormatted,
         tech,
         client: dossier,
         type: typeEvent,
-        duration: Math.max(besoin, capacite), 
+        duration: isOfficial ? Math.max(besoin, capacite) : duration, // Affichage durée
         status,
         color,
         raw_besoin: besoin,
