@@ -51,16 +51,37 @@ export default async function handler(request, response) {
       }
 
       try {
+        // --- FILTRE RESPONSABLES (Réutilisable) ---
+        // Utilisation de ILIKE pour ignorer la casse (majuscule/minuscule)
+        const filtreTechs = `
+            AND (
+                 RESPONSABLE ILIKE '%AYAT%' 
+              OR RESPONSABLE ILIKE '%MESSIN%' 
+              OR RESPONSABLE ILIKE '%GROSSI%' 
+              OR RESPONSABLE ILIKE '%SAUROIS%' 
+              OR RESPONSABLE ILIKE '%GAMONDES%'
+            )
+        `;
+
         // --- REQUÊTE 1 : BACKOFFICE ---
         const sqlBackoffice = `
-            SELECT DATE, HEURE, DUREE_HRS, RESPONSABLE, DOSSIER, LIBELLE, EVENEMENT, NUMDOSSIER, "USER"
+            SELECT 
+                DATE, 
+                HEURE, 
+                DUREE_HRS, 
+                RESPONSABLE, 
+                DOSSIER, 
+                LIBELLE, 
+                EVENEMENT, 
+                NUMDOSSIER, 
+                "USER" as NB_USERS -- Alias pour compatibilité frontend
             FROM V_EVENEMENT_TECHNIQUE
             WHERE DATE >= '2025-01-01' AND DATE <= '2026-12-31'
+            ${filtreTechs}
             ORDER BY DATE DESC
         `;
 
-        // --- REQUÊTE 2 : EN COURS (Modifiée avec REPORTE_LE) ---
-        // On utilise COALESCE dans le WHERE : Si REPORTE_LE existe, on filtre dessus, sinon on filtre sur DERNIERE_ACTION
+        // --- REQUÊTE 2 : EN COURS ---
         const sqlEncours = `
             SELECT 
                 ETAT_PRIORITE,
@@ -77,14 +98,15 @@ export default async function handler(request, response) {
             FROM V_TICKETS_SERVICE_TECHNIQUE
             WHERE COALESCE(REPORTE_LE, DERNIERE_ACTION) >= '2025-01-01' 
               AND COALESCE(REPORTE_LE, DERNIERE_ACTION) <= '2026-12-31'
+            ${filtreTechs}
         `;
 
-        console.log("Exécution requêtes...");
+        console.log("Exécution requêtes filtrées...");
         const backofficeRows = await runQuery(conn, sqlBackoffice);
         const encoursRows = await runQuery(conn, sqlEncours);
 
         response.status(200).json({
-            message: "Données complètes récupérées ✅",
+            message: "Données filtrées récupérées ✅",
             backoffice: backofficeRows,
             encours: encoursRows
         });
