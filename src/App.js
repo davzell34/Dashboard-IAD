@@ -120,15 +120,14 @@ const getEventTimeRange = (dateObj, timeStr, durationHrs) => {
     return { start: start.getTime(), end: end.getTime() };
 };
 
-// Calcule le nombre d'heures de chevauchement entre deux plages
 const getOverlapHours = (range1, range2) => {
     if (!range1 || !range2) return 0;
     const start = Math.max(range1.start, range2.start);
     const end = Math.min(range1.end, range2.end);
     
-    if (end <= start) return 0; // Pas de chevauchement
+    if (end <= start) return 0; 
     
-    return (end - start) / (1000 * 60 * 60); // Retourne le résultat en heures
+    return (end - start) / (1000 * 60 * 60); 
 };
 
 // --- CALCUL AVANCEMENT ---
@@ -222,7 +221,6 @@ function MigrationDashboard() {
   const [isTableExpanded, setIsTableExpanded] = useState(false); 
   const [isTechChartExpanded, setIsTechChartExpanded] = useState(false); 
 
-  // --- DEBUG STATE ---
   const [debugData, setDebugData] = useState(null);
   const [isDebugOpen, setIsDebugOpen] = useState(false);
 
@@ -265,14 +263,12 @@ function MigrationDashboard() {
     const monthlyStats = new Map();
     const monthsSet = new Set(); 
 
-    // Liste stricte des événements autorisés comme "Besoins"
     const allowedNeedEvents = [
         'Avocatmail - Analyse', 
         'Migration messagerie Adwin', 
         'Migration messagerie Adwin - analyse',
     ];
 
-    // 1. PHASE PRÉPARATOIRE : CREATION DES OBJETS "INTELLIGENTS"
     let allEvents = [];
 
     backofficeData.forEach(row => {
@@ -282,12 +278,12 @@ function MigrationDashboard() {
         const typeEventRaw = cleanRow['EVENEMENT'] || "";
         const typeEventLower = typeEventRaw.toLowerCase();
         
-        // Détection Type
-        const isBackoffice = typeEventLower.includes('backoffice') || typeEventLower.includes('back office');
+        // --- MODIFICATION RESTRICTIVE : Uniquement Avocatmail ---
+        const isBackoffice = typeEventLower.includes('tache de backoffice avocatmail');
+        
         const isNeed = allowedNeedEvents.includes(typeEventRaw) || 
                        (typeEventLower.includes("avocatmail") && typeEventLower.includes("analyse"));
 
-        // On ignore ce qui n'est ni BO ni Besoin pertinent
         if (!isBackoffice && !isNeed) return;
 
         const resp = cleanRow['RESPONSABLE'];
@@ -314,27 +310,23 @@ function MigrationDashboard() {
             month,
             tech,
             typeRaw: typeEventRaw,
-            duration, // Durée brute affichée
+            duration,
             isBackoffice,
             isNeed,
-            timeRange, // Peut être null si pas d'heure
+            timeRange,
             dossier,
             nbUsers,
-            // Champs calculés
-            netCapacity: isBackoffice ? duration : 0, // Capacité par défaut = durée totale
-            netNeed: 0, // Sera calculé après
+            netCapacity: isBackoffice ? duration : 0, 
+            netNeed: 0, 
             isAbsorbed: false,
             status: '',
             color: ''
         });
     });
 
-    // 2. PHASE DE CALCUL DES COLLISIONS
-    // On sépare pour itérer
     const boEvents = allEvents.filter(e => e.isBackoffice);
     const techEvents = allEvents.filter(e => e.isNeed);
 
-    // Initialisation des besoins
     techEvents.forEach(te => {
         const users = parseInt(te.nbUsers, 10) || 1;
         let baseNeed = 1.0;
@@ -342,31 +334,22 @@ function MigrationDashboard() {
         te.netNeed = Math.max(te.duration, baseNeed);
     });
 
-    // BOUCLE MAGIQUE : ABSORPTION
     techEvents.forEach(te => {
-        // On cherche un BO compatible
         const boMatch = boEvents.find(bo => 
             bo.tech === te.tech && 
             bo.date === te.date && 
-            bo.timeRange && te.timeRange && // Il faut des heures pour absorber
+            bo.timeRange && te.timeRange && 
             getOverlapHours(bo.timeRange, te.timeRange) > 0
         );
 
         if (boMatch) {
-            // 
-            // Si chevauchement trouvé :
             const overlap = getOverlapHours(boMatch.timeRange, te.timeRange);
-            
-            // 1. On diminue la capacité du BO
             boMatch.netCapacity = Math.max(0, boMatch.netCapacity - overlap);
-            
-            // 2. On annule le besoin technique (car fait pendant le BO)
             te.netNeed = 0;
             te.isAbsorbed = true;
         }
     });
 
-    // 3. PHASE FINALE : STATS & LISTE
     const addToStats = (month, tech, besoin, besoin_encours, capacite) => {
         monthsSet.add(month);
         const key = `${month}_${tech}`;
@@ -381,26 +364,21 @@ function MigrationDashboard() {
 
     const finalEventsList = [];
 
-    // On traite tout le monde pour la liste finale
     [...boEvents, ...techEvents].forEach(ev => {
-        // Définition couleurs et statuts
         if (ev.isBackoffice) {
             ev.color = 'purple';
             ev.status = ev.netCapacity < ev.duration 
                 ? `Prod BO (Net: ${ev.netCapacity.toFixed(1)}h)` 
                 : 'Production (Backoffice)';
-            // Ajout aux stats (Capacité Nette)
             addToStats(ev.month, ev.tech, 0, 0, ev.netCapacity);
         } 
         else {
             if (ev.isAbsorbed) {
                 ev.color = 'slate';
                 ev.status = 'Planifié pendant BO';
-                // PAS D'AJOUT AUX STATS (Besoin = 0)
             } else {
                 ev.color = 'cyan';
                 ev.status = 'Besoin (Analyse/Migr)';
-                // Ajout aux stats (Besoin Standard)
                 addToStats(ev.month, ev.tech, ev.netNeed, 0, 0);
             }
         }
@@ -413,13 +391,12 @@ function MigrationDashboard() {
             duration: ev.duration,
             status: ev.status,
             color: ev.color,
-            raw_besoin: ev.netNeed, // 0 si absorbé
+            raw_besoin: ev.netNeed,
             raw_capacite: ev.netCapacity,
             raw_besoin_encours: 0
         });
     });
 
-    // 4. ENCOURS (Inchangé)
     let countReadyMiseEnPlace = 0;
     let countReadyAnalyse = 0; 
     const planningEventsList = [];
@@ -678,7 +655,6 @@ function MigrationDashboard() {
 
       {/* KPI GRID */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-        {/* NOUVEAU DOUBLE PIPE (BARRES) */}
         <div 
             onClick={() => { setShowPlanning(!showPlanning); setSelectedMonth(null); }}
             className={`px-4 py-3 rounded-lg shadow-sm border flex flex-col justify-center cursor-pointer transition-all duration-200 gap-3
@@ -789,9 +765,8 @@ function MigrationDashboard() {
         )}
       </div>
 
-      {/* --- BLOC BAS : CHARGE TECH & TABLEAU MENSUEL (REPLIÉS) --- */}
+      {/* --- BLOC BAS --- */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
-        {/* CHARGE PAR TECH */}
         <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden h-fit">
             <button onClick={() => setIsTechChartExpanded(!isTechChartExpanded)} className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors">
                 <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Users className="w-4 h-4 text-slate-400" />Charge par Tech {selectedMonth ? `(${formatMonth(selectedMonth)})` : "(Globale)"}</h2>
@@ -813,7 +788,6 @@ function MigrationDashboard() {
                 </div>
             )}
         </div>
-        <div className="hidden lg:block"></div> 
       </div>
 
       {/* TABLEAU MENSUEL */}
@@ -850,7 +824,7 @@ function MigrationDashboard() {
         )}
       </div>
 
-      {/* --- DEBUG CONSOLE (Rétractable) --- */}
+      {/* DEBUG CONSOLE */}
       <div className={`fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out ${isDebugOpen ? 'translate-y-0' : 'translate-y-[calc(100%-40px)]'}`}>
         <div className="bg-slate-900 border-t border-slate-700 shadow-2xl flex flex-col h-64">
             <button 
