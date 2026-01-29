@@ -6,7 +6,8 @@ import {
 import { 
   Activity, Users, Clock, TrendingUp, AlertTriangle, CheckCircle, 
   Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Loader,
-  ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout, Search, Layers, Server, FileSearch, Terminal
+  ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout, Search, Layers, Server, FileSearch, Terminal,
+  Calculator, Database
 } from 'lucide-react';
 import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
 
@@ -36,7 +37,7 @@ const normalizeTechName = (name, techList) => {
   return cleanName;
 };
 
-// CORRECTION DATE : Force le format YYYY-MM-DD en heure LOCALE (pas UTC)
+// CORRECTION DATE : Force le format YYYY-MM-DD en heure LOCALE
 const toLocalDateString = (date) => {
     if (!date) return "N/A";
     const offset = date.getTimezoneOffset();
@@ -231,6 +232,7 @@ function MigrationDashboard() {
   // --- DEBUG STATE ---
   const [debugData, setDebugData] = useState(null);
   const [isDebugOpen, setIsDebugOpen] = useState(false);
+  const [debugTab, setDebugTab] = useState('calc'); // 'raw' ou 'calc'
 
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
 
@@ -245,7 +247,6 @@ function MigrationDashboard() {
           headers: { Authorization: `Bearer ${token}` }
         });
         const json = await response.json();
-        
         setDebugData(json);
 
         if (!response.ok) throw new Error(json.error || `Erreur API`);
@@ -272,7 +273,7 @@ function MigrationDashboard() {
     const monthlyStats = new Map();
     const monthsSet = new Set(); 
     const techBackofficeSchedule = {}; 
-    const scheduledClients = new Set(); // Pour déduplication
+    const scheduledClients = new Set(); 
 
     const allowedNeedEvents = [
         'Avocatmail - Analyse', 
@@ -306,7 +307,6 @@ function MigrationDashboard() {
         const dateEvent = parseDateSafe(dateStr);
         if(!dateEvent) return;
         
-        // Utilisation de la nouvelle fonction pour éviter le décalage UTC
         const dateFormatted = toLocalDateString(dateEvent);
         const month = dateFormatted.substring(0, 7);
         const duration = calculateDuration(duree);
@@ -348,7 +348,7 @@ function MigrationDashboard() {
         techBackofficeSchedule[t].sort((a, b) => a - b);
     });
 
-    // 2. COLLISIONS & ABSORPTION
+    // 2. COLLISIONS
     const boEvents = allEvents.filter(e => e.isBackoffice);
     const techEvents = allEvents.filter(e => e.isNeed);
 
@@ -375,7 +375,7 @@ function MigrationDashboard() {
         }
     });
 
-    // 3. STATS & LISTE FINALE
+    // 3. STATS
     const addToStats = (month, tech, besoin, besoin_encours, capacite) => {
         monthsSet.add(month);
         const key = `${month}_${tech}`;
@@ -423,7 +423,7 @@ function MigrationDashboard() {
         });
     });
 
-    // 4. ENCOURS (GLISSANT & DEDUPLIQUÉ)
+    // 4. ENCOURS
     let countReadyMiseEnPlace = 0;
     let countReadyAnalyse = 0; 
     const planningEventsList = [];
@@ -442,6 +442,7 @@ function MigrationDashboard() {
         
         if (!techList.includes(tech)) return;
 
+        // DÉDUPLICATION
         if (scheduledClients.has(clientName.trim().toUpperCase())) {
             return;
         }
@@ -493,7 +494,6 @@ function MigrationDashboard() {
         }
 
         if (targetDate) { 
-            // CORRECTION DATE ICI AUSSI : Utilisation de toLocalDateString
             const targetDateStr = toLocalDateString(targetDate);
             const targetMonth = targetDateStr.substring(0, 7);
 
@@ -525,6 +525,28 @@ function MigrationDashboard() {
         availableMonths: sortedMonths
     };
   }, [backofficeData, encoursData, techList]);
+
+  // --- LOGIQUE DEBUG AUDIT ---
+  const auditData = useMemo(() => {
+      if (!selectedMonth) return null;
+      
+      // Filtrer les événements qui constituent le "Besoin (Nouv)" pour ce mois
+      const relevantEvents = eventsData.filter(e => 
+          e.date.startsWith(selectedMonth) && 
+          e.raw_besoin > 0 &&
+          (selectedTech === 'Tous' || e.tech === selectedTech)
+      );
+
+      // Grouper par semaine
+      const grouped = {};
+      relevantEvents.forEach(e => {
+          const week = getWeekLabel(e.date);
+          if (!grouped[week]) grouped[week] = [];
+          grouped[week].push(e);
+      });
+
+      return grouped;
+  }, [eventsData, selectedMonth, selectedTech]);
 
   // --- LOGIQUE TRI & AFFICHAGE ---
   const handleSort = (key) => {
@@ -887,30 +909,101 @@ function MigrationDashboard() {
         )}
       </div>
 
-      {/* --- DEBUG CONSOLE (Rétractable) --- */}
+      {/* --- DEBUG CONSOLE (Rétractable avec Onglets) --- */}
       <div className={`fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out ${isDebugOpen ? 'translate-y-0' : 'translate-y-[calc(100%-40px)]'}`}>
         <div className="bg-slate-900 border-t border-slate-700 shadow-2xl flex flex-col h-64">
-            <button 
-                onClick={() => setIsDebugOpen(!isDebugOpen)}
-                className="w-full h-10 bg-slate-800 hover:bg-slate-700 text-white text-xs font-mono flex items-center justify-between px-4 transition-colors cursor-pointer border-b border-slate-700"
-            >
+            
+            {/* Header avec Onglets */}
+            <div className="w-full h-10 bg-slate-800 flex items-center justify-between px-4 border-b border-slate-700">
+                <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 cursor-pointer text-white text-xs font-mono" onClick={() => setIsDebugOpen(!isDebugOpen)}>
+                        <Terminal size={14} className="text-green-400" />
+                        <span>CONSOLE DEBUG</span>
+                    </div>
+                    {/* Onglets */}
+                    <div className="flex bg-slate-950 rounded p-0.5">
+                        <button 
+                            onClick={() => setDebugTab('raw')}
+                            className={`px-3 py-1 text-[10px] rounded transition-colors ${debugTab === 'raw' ? 'bg-slate-700 text-white font-bold' : 'text-slate-400 hover:text-slate-200'}`}
+                        >
+                            Données Brutes
+                        </button>
+                        <button 
+                            onClick={() => setDebugTab('calc')}
+                            className={`px-3 py-1 text-[10px] rounded transition-colors ${debugTab === 'calc' ? 'bg-blue-900 text-blue-100 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
+                        >
+                            Audit : Besoin (Nouv)
+                        </button>
+                    </div>
+                </div>
                 <div className="flex items-center gap-2">
-                    <Terminal size={14} className="text-green-400" />
-                    <span>CONSOLE DEBUG : SNOWFLAKE DATA</span>
                     {debugData && (
                         <span className={`px-2 py-0.5 rounded text-[10px] ${debugData.error ? 'bg-red-900 text-red-300' : 'bg-green-900 text-green-300'}`}>
                             {debugData.error ? 'ERREUR API' : 'DONNÉES REÇUES'}
                         </span>
                     )}
+                    <button onClick={() => setIsDebugOpen(!isDebugOpen)} className="text-slate-400 hover:text-white">
+                        {isDebugOpen ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+                    </button>
                 </div>
-                {isDebugOpen ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-            </button>
-            <div className="flex-1 overflow-auto p-4 font-mono text-xs text-green-400 bg-slate-950">
-                {debugData ? (
-                    <pre>{JSON.stringify(debugData, null, 2)}</pre>
+            </div>
+
+            {/* Contenu */}
+            <div className="flex-1 overflow-auto p-4 font-mono text-xs bg-slate-950">
+                {debugTab === 'raw' ? (
+                    <div className="text-green-400">
+                        {debugData ? (
+                            <pre>{JSON.stringify(debugData, null, 2)}</pre>
+                        ) : (
+                            <div className="flex items-center gap-2 text-slate-500">
+                                <Activity size={14} className="animate-spin" /> Chargement des données...
+                            </div>
+                        )}
+                    </div>
                 ) : (
-                    <div className="flex items-center gap-2 text-slate-500">
-                        <Activity size={14} className="animate-spin" /> Chargement des données...
+                    <div className="text-blue-200">
+                        {auditData ? (
+                            Object.keys(auditData).length > 0 ? (
+                                Object.entries(auditData).map(([week, events]) => (
+                                    <div key={week} className="mb-4 border-b border-slate-800 pb-2">
+                                        <h3 className="font-bold text-yellow-400 mb-1">Semaine {week} <span className="text-slate-500 font-normal">({events.length} événements)</span></h3>
+                                        <table className="w-full text-left text-[10px]">
+                                            <thead>
+                                                <tr className="text-slate-500 border-b border-slate-800">
+                                                    <th className="pb-1">Date</th>
+                                                    <th className="pb-1">Client</th>
+                                                    <th className="pb-1">Technicien</th>
+                                                    <th className="pb-1 text-right">Valeur (h)</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {events.map((ev, i) => (
+                                                    <tr key={i} className="hover:bg-slate-900">
+                                                        <td className="py-0.5 text-slate-300">{ev.date}</td>
+                                                        <td className="py-0.5 text-blue-300 truncate max-w-[200px]">{ev.client}</td>
+                                                        <td className="py-0.5 text-slate-400">{ev.tech}</td>
+                                                        <td className="py-0.5 text-right font-bold text-white">{ev.raw_besoin.toFixed(2)}</td>
+                                                    </tr>
+                                                ))}
+                                                <tr className="bg-slate-900 font-bold">
+                                                    <td colSpan="3" className="text-right py-1 text-slate-400">TOTAL SEMAINE :</td>
+                                                    <td className="text-right py-1 text-green-400">
+                                                        {events.reduce((sum, e) => sum + e.raw_besoin, 0).toFixed(2)} h
+                                                    </td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="text-slate-500 italic p-4">Aucun événement "Besoin (Nouv)" trouvé pour ce mois.</div>
+                            )
+                        ) : (
+                            <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-2">
+                                <Calculator size={24} />
+                                <p>Sélectionnez un mois sur le graphique pour voir le détail hebdomadaire.</p>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
