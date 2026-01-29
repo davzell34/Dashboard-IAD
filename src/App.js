@@ -36,6 +36,14 @@ const normalizeTechName = (name, techList) => {
   return cleanName;
 };
 
+// CORRECTION DATE : Force le format YYYY-MM-DD en heure LOCALE (pas UTC)
+const toLocalDateString = (date) => {
+    if (!date) return "N/A";
+    const offset = date.getTimezoneOffset();
+    const localDate = new Date(date.getTime() - (offset * 60 * 1000));
+    return localDate.toISOString().split('T')[0];
+};
+
 const formatMonth = (dateStr) => {
   if (!dateStr) return '';
   const [year, month] = dateStr.split('-');
@@ -254,7 +262,7 @@ function MigrationDashboard() {
     fetchData();
   }, [getToken]);
   
-  // --- TRAITEMENT CORE (LOGIQUE D'ABSORPTION & DEDUPLICATION) ---
+  // --- TRAITEMENT CORE ---
 
   const { detailedData, eventsData, planningCount, analysisPipeCount, availableMonths } = useMemo(() => {
     if (backofficeData.length === 0 && encoursData.length === 0) {
@@ -264,9 +272,7 @@ function MigrationDashboard() {
     const monthlyStats = new Map();
     const monthsSet = new Set(); 
     const techBackofficeSchedule = {}; 
-    
-    // NOUVEAU : Set pour suivre les clients déjà planifiés et éviter le double comptage
-    const scheduledClients = new Set();
+    const scheduledClients = new Set(); // Pour déduplication
 
     const allowedNeedEvents = [
         'Avocatmail - Analyse', 
@@ -274,9 +280,9 @@ function MigrationDashboard() {
         'Migration messagerie Adwin - analyse',
     ];
 
-    // 1. PHASE PRÉPARATOIRE : CREATION DES OBJETS EVENEMENTS
     let allEvents = [];
 
+    // 1. TRAITEMENT BACKOFFICE / PLANNING
     backofficeData.forEach(row => {
         const cleanRow = {};
         Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
@@ -300,7 +306,8 @@ function MigrationDashboard() {
         const dateEvent = parseDateSafe(dateStr);
         if(!dateEvent) return;
         
-        const dateFormatted = dateEvent.toISOString().split('T')[0];
+        // Utilisation de la nouvelle fonction pour éviter le décalage UTC
+        const dateFormatted = toLocalDateString(dateEvent);
         const month = dateFormatted.substring(0, 7);
         const duration = calculateDuration(duree);
         const timeRange = getEventTimeRange(dateEvent, timeStr, duration);
@@ -308,13 +315,11 @@ function MigrationDashboard() {
         const dossier = cleanRow['DOSSIER'] || cleanRow['LIBELLE'] || 'Client Inconnu';
         const nbUsers = cleanRow['NB_USERS'] || cleanRow['USER'] || '1';
 
-        // Indexation pour les encours (glissement)
         if (isBackoffice) {
             if (!techBackofficeSchedule[tech]) techBackofficeSchedule[tech] = [];
             techBackofficeSchedule[tech].push(dateEvent.getTime());
         }
 
-        // NOUVEAU : On note que ce client est déjà planifié (pour dédupliquer les encours)
         if (dossier && dossier !== 'Client Inconnu') {
             scheduledClients.add(dossier.trim().toUpperCase());
         }
@@ -343,7 +348,7 @@ function MigrationDashboard() {
         techBackofficeSchedule[t].sort((a, b) => a - b);
     });
 
-    // 2. PHASE DE CALCUL DES COLLISIONS
+    // 2. COLLISIONS & ABSORPTION
     const boEvents = allEvents.filter(e => e.isBackoffice);
     const techEvents = allEvents.filter(e => e.isNeed);
 
@@ -370,7 +375,7 @@ function MigrationDashboard() {
         }
     });
 
-    // 3. PHASE FINALE : STATS & LISTE
+    // 3. STATS & LISTE FINALE
     const addToStats = (month, tech, besoin, besoin_encours, capacite) => {
         monthsSet.add(month);
         const key = `${month}_${tech}`;
@@ -437,8 +442,6 @@ function MigrationDashboard() {
         
         if (!techList.includes(tech)) return;
 
-        // DÉDUPLICATION : Si le client est déjà dans le planning (Calendar), on ignore son ticket "En cours"
-        // pour ne pas compter le besoin deux fois.
         if (scheduledClients.has(clientName.trim().toUpperCase())) {
             return;
         }
@@ -490,7 +493,8 @@ function MigrationDashboard() {
         }
 
         if (targetDate) { 
-            const targetDateStr = targetDate.toISOString().split('T')[0];
+            // CORRECTION DATE ICI AUSSI : Utilisation de toLocalDateString
+            const targetDateStr = toLocalDateString(targetDate);
             const targetMonth = targetDateStr.substring(0, 7);
 
             addToStats(targetMonth, tech, 0, remainingLoad, 0);
