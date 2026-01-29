@@ -120,14 +120,15 @@ const getEventTimeRange = (dateObj, timeStr, durationHrs) => {
     return { start: start.getTime(), end: end.getTime() };
 };
 
+// Calcule le nombre d'heures de chevauchement entre deux plages
 const getOverlapHours = (range1, range2) => {
     if (!range1 || !range2) return 0;
     const start = Math.max(range1.start, range2.start);
     const end = Math.min(range1.end, range2.end);
     
-    if (end <= start) return 0; 
+    if (end <= start) return 0; // Pas de chevauchement
     
-    return (end - start) / (1000 * 60 * 60); 
+    return (end - start) / (1000 * 60 * 60); // Retourne le résultat en heures
 };
 
 // --- CALCUL AVANCEMENT ---
@@ -221,6 +222,7 @@ function MigrationDashboard() {
   const [isTableExpanded, setIsTableExpanded] = useState(false); 
   const [isTechChartExpanded, setIsTechChartExpanded] = useState(false); 
 
+  // --- DEBUG STATE ---
   const [debugData, setDebugData] = useState(null);
   const [isDebugOpen, setIsDebugOpen] = useState(false);
 
@@ -596,10 +598,15 @@ function MigrationDashboard() {
     return { besoin: totalBesoin, capacite: totalCapacite, ratio };
   }, [mainChartData]);
 
+  // --- CORRECTION CLIC GRAPHIQUE ---
   const handleChartClick = (data) => {
-    if (data && data.activeLabel && !selectedMonth) {
-       setSelectedMonth(data.activeLabel);
-       setShowPlanning(false); 
+    // On sécurise pour récupérer la vraie donnée (le mois technique) et pas le label affiché (ex: "janv. 25")
+    if (data && data.activePayload && data.activePayload.length > 0 && !selectedMonth) {
+         const clickedData = data.activePayload[0].payload;
+         if(clickedData && clickedData.month) {
+             setSelectedMonth(clickedData.month); // Utilise la clé "2025-01"
+             setShowPlanning(false);
+         }
     }
   };
 
@@ -655,6 +662,7 @@ function MigrationDashboard() {
 
       {/* KPI GRID */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        {/* NOUVEAU DOUBLE PIPE (BARRES) */}
         <div 
             onClick={() => { setShowPlanning(!showPlanning); setSelectedMonth(null); }}
             className={`px-4 py-3 rounded-lg shadow-sm border flex flex-col justify-center cursor-pointer transition-all duration-200 gap-3
@@ -765,8 +773,9 @@ function MigrationDashboard() {
         )}
       </div>
 
-      {/* --- BLOC BAS --- */}
+      {/* --- BLOC BAS : CHARGE TECH & TABLEAU MENSUEL (REPLIÉS) --- */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+        {/* CHARGE PAR TECH */}
         <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden h-fit">
             <button onClick={() => setIsTechChartExpanded(!isTechChartExpanded)} className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors">
                 <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Users className="w-4 h-4 text-slate-400" />Charge par Tech {selectedMonth ? `(${formatMonth(selectedMonth)})` : "(Globale)"}</h2>
@@ -788,6 +797,7 @@ function MigrationDashboard() {
                 </div>
             )}
         </div>
+        <div className="hidden lg:block"></div> 
       </div>
 
       {/* TABLEAU MENSUEL */}
@@ -824,7 +834,7 @@ function MigrationDashboard() {
         )}
       </div>
 
-      {/* DEBUG CONSOLE */}
+      {/* --- DEBUG CONSOLE (Rétractable) --- */}
       <div className={`fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out ${isDebugOpen ? 'translate-y-0' : 'translate-y-[calc(100%-40px)]'}`}>
         <div className="bg-slate-900 border-t border-slate-700 shadow-2xl flex flex-col h-64">
             <button 
