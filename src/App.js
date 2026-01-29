@@ -107,7 +107,6 @@ const calculateDuration = (duree) => {
 // --- GESTION DES PLAGES HORAIRES ---
 const getEventTimeRange = (dateObj, timeStr, durationHrs) => {
     if (!dateObj) return null;
-    // Si pas d'heure, on ne peut pas calculer d'overlap -> return null
     if (!timeStr || typeof timeStr !== 'string' || !timeStr.includes(':')) return null;
     
     const [h, m] = timeStr.split(':').map(Number);
@@ -255,7 +254,7 @@ function MigrationDashboard() {
     fetchData();
   }, [getToken]);
   
-  // --- TRAITEMENT CORE (LOGIQUE D'ABSORPTION) ---
+  // --- TRAITEMENT CORE (LOGIQUE D'ABSORPTION & DEDUPLICATION) ---
 
   const { detailedData, eventsData, planningCount, analysisPipeCount, availableMonths } = useMemo(() => {
     if (backofficeData.length === 0 && encoursData.length === 0) {
@@ -264,9 +263,11 @@ function MigrationDashboard() {
 
     const monthlyStats = new Map();
     const monthsSet = new Set(); 
-    const techBackofficeSchedule = {}; // Pour le glissement automatique
+    const techBackofficeSchedule = {}; 
+    
+    // NOUVEAU : Set pour suivre les clients déjà planifiés et éviter le double comptage
+    const scheduledClients = new Set();
 
-    // Liste stricte des événements autorisés
     const allowedNeedEvents = [
         'Avocatmail - Analyse', 
         'Migration messagerie Adwin', 
@@ -307,10 +308,15 @@ function MigrationDashboard() {
         const dossier = cleanRow['DOSSIER'] || cleanRow['LIBELLE'] || 'Client Inconnu';
         const nbUsers = cleanRow['NB_USERS'] || cleanRow['USER'] || '1';
 
-        // Indexation pour les encours
+        // Indexation pour les encours (glissement)
         if (isBackoffice) {
             if (!techBackofficeSchedule[tech]) techBackofficeSchedule[tech] = [];
             techBackofficeSchedule[tech].push(dateEvent.getTime());
+        }
+
+        // NOUVEAU : On note que ce client est déjà planifié (pour dédupliquer les encours)
+        if (dossier && dossier !== 'Client Inconnu') {
+            scheduledClients.add(dossier.trim().toUpperCase());
         }
 
         allEvents.push({
@@ -333,7 +339,6 @@ function MigrationDashboard() {
         });
     });
 
-    // Tri des dates pour le glissement
     Object.keys(techBackofficeSchedule).forEach(t => {
         techBackofficeSchedule[t].sort((a, b) => a - b);
     });
@@ -365,7 +370,7 @@ function MigrationDashboard() {
         }
     });
 
-    // 3. PHASE FINALE : STATS & LISTE (Backoffice & Events)
+    // 3. PHASE FINALE : STATS & LISTE
     const addToStats = (month, tech, besoin, besoin_encours, capacite) => {
         monthsSet.add(month);
         const key = `${month}_${tech}`;
@@ -392,7 +397,6 @@ function MigrationDashboard() {
             if (ev.isAbsorbed) {
                 ev.color = 'slate';
                 ev.status = 'Planifié pendant BO';
-                // Pas de stat (besoin = 0)
             } else {
                 ev.color = 'cyan';
                 ev.status = 'Besoin (Analyse/Migr)';
@@ -414,7 +418,7 @@ function MigrationDashboard() {
         });
     });
 
-    // 4. ENCOURS (GLISSANT)
+    // 4. ENCOURS (GLISSANT & DEDUPLIQUÉ)
     let countReadyMiseEnPlace = 0;
     let countReadyAnalyse = 0; 
     const planningEventsList = [];
@@ -432,6 +436,12 @@ function MigrationDashboard() {
         const tech = normalizeTechName(techNameRaw, techList);
         
         if (!techList.includes(tech)) return;
+
+        // DÉDUPLICATION : Si le client est déjà dans le planning (Calendar), on ignore son ticket "En cours"
+        // pour ne pas compter le besoin deux fois.
+        if (scheduledClients.has(clientName.trim().toUpperCase())) {
+            return;
+        }
 
         if (categorie === 'Prêt pour mise en place') {
             countReadyMiseEnPlace++;
@@ -458,13 +468,11 @@ function MigrationDashboard() {
         let status = "";
         let color = "";
 
-        // CAS 1 : DATE DE REPORT FORCÉE
         if (reportDate) {
             targetDate = reportDate;
             status = "Reporté";
             color = "red";
         } 
-        // CAS 2 : GLISSEMENT SUR PROCHAIN CRÉNEAU
         else {
             const techSlots = techBackofficeSchedule[tech] || [];
             const targetSlotTime = techSlots.find(t => t >= todayTime);
@@ -481,7 +489,6 @@ function MigrationDashboard() {
             }
         }
 
-        // CORRECTION MAJEURE ICI : On ajoute si targetDate existe (ce qui est toujours le cas), pas si reportDate existe
         if (targetDate) { 
             const targetDateStr = targetDate.toISOString().split('T')[0];
             const targetMonth = targetDateStr.substring(0, 7);
@@ -642,7 +649,6 @@ function MigrationDashboard() {
     return { besoin: totalBesoin, capacite: totalCapacite, ratio };
   }, [mainChartData]);
 
-  // --- CORRECTION CLIC GRAPHIQUE ---
   const handleChartClick = (data) => {
     if (data && data.activePayload && data.activePayload.length > 0 && !selectedMonth) {
          const clickedData = data.activePayload[0].payload;
