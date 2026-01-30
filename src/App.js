@@ -1,12 +1,15 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart
+  BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  LineChart, Line, AreaChart, Area, ComposedChart, ReferenceLine, RadialBarChart, RadialBar
 } from 'recharts';
 import { 
-  Activity, Users, Clock, TrendingUp, Filter, Info, X, Table as TableIcon, 
-  ChevronDown, ChevronUp, FileText, Loader, ArrowUp, ArrowDown, Terminal, Calculator
+  Activity, Users, Clock, TrendingUp, AlertTriangle, CheckCircle, 
+  Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Loader,
+  ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout, Search, Layers, Server, FileSearch, Terminal,
+  Calculator, Database, BookOpen
 } from 'lucide-react';
-import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useAuth } from "@clerk/clerk-react";
+import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
 
 // --- CONFIGURATION ---
 const TECH_LIST_DEFAULT = [
@@ -140,7 +143,7 @@ const getOverlapHours = (range1, range2) => {
     return (end - start) / (1000 * 60 * 60); 
 };
 
-// --- LOGIQUE PONDÉRATION (CORRIGÉE) ---
+// --- LOGIQUE PONDÉRATION (MISE À JOUR) ---
 const getRemainingLoad = (categorie, motif) => {
     const cleanCat = safeString(categorie).toLowerCase();
     const cleanMotif = safeString(motif);
@@ -154,10 +157,15 @@ const getRemainingLoad = (categorie, motif) => {
         return 0; // Sinon ignoré
     }
 
-    // 2. Cas AVEC CATÉGORIE
+    // 2. Cas AVEC CATÉGORIE (Règles mises à jour)
     if (cleanCat.includes('prêt pour mise en place') || cleanCat.includes('a planifier')) return 1.0;
-    if (cleanCat.includes('copie en cours')) return 0.75;
-    if (cleanCat.includes('préparation tenant')) return 0.15;
+    
+    // Changement ici : Préparation Tenant passe à 0.75
+    if (cleanCat.includes('préparation tenant')) return 0.75;
+    
+    // Changement ici : Copie en cours passe à 0.15
+    if (cleanCat.includes('copie en cours')) return 0.15;
+    
     if (cleanCat.includes('attente') || cleanCat.includes('bloqué')) return 0.05;
     if (cleanCat.includes('suspendu')) return 0.0;
     
@@ -188,7 +196,17 @@ const RulesModal = ({ isOpen, onClose }) => {
                         <ul className="list-disc pl-4 space-y-1 text-slate-600">
                             <li>Déduplication : Si client déjà planifié (Bleu) -> Ignoré (0h). <span className="text-red-500 font-bold">SAUF SI date de report fixée.</span></li>
                             <li>Sans Catégorie : Ignoré, sauf motif <i>"[IAD] - Préparation Avocatmail"</i> (0.50h).</li>
-                            <li>Charge : Prêt/Planif (1h), Copie (0.75h), Std (0.5h), Prép Tenant (0.15h), Attente (0.05h).</li>
+                            <li className="mt-2">
+                                <span className="font-semibold text-slate-800 border-b border-slate-200 pb-0.5">Pondération (Charge) :</span>
+                                <ul className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1 ml-2">
+                                    <li>• Prêt / A planifier : <b>1.00 h</b></li>
+                                    <li>• Prép. Tenant : <b>0.75 h</b></li> {/* Mis à jour */}
+                                    <li>• Standard / Autre : <b>0.50 h</b></li>
+                                    <li>• Copie en cours : <b>0.15 h</b></li> {/* Mis à jour */}
+                                    <li>• Attente / Bloqué : <b>0.05 h</b></li>
+                                    <li>• Suspendu : <b>0.00 h</b></li>
+                                </ul>
+                            </li>
                         </ul>
                     </div>
                     <div className="space-y-2">
@@ -246,7 +264,7 @@ const SortableHeader = ({ label, sortKey, currentSort, onSort, align = 'left' })
     <th className={`px-2 py-2 font-semibold whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors group select-none text-${align}`} onClick={() => onSort(sortKey)}>
       <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start'}`}>
         {label}
-        <span className="text-slate-400">{isSorted ? (currentSort.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : (<ArrowDown size={12} className="opacity-0 group-hover:opacity-50" />)}</span>
+        <span className="text-slate-400">{isSorted ? (currentSort.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : (<ArrowUpDown size={12} className="opacity-0 group-hover:opacity-50" />)}</span>
       </div>
     </th>
   );
