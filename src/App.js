@@ -7,7 +7,7 @@ import {
   Activity, Users, Clock, TrendingUp, AlertTriangle, CheckCircle, 
   Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Loader,
   ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout, Search, Layers, Server, FileSearch, Terminal,
-  Calculator, Database
+  Calculator, Database, BookOpen
 } from 'lucide-react';
 import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
 
@@ -195,6 +195,81 @@ const getRemainingLoad = (categorie) => {
 
 // --- COMPOSANTS UI ---
 
+// NOUVEAU COMPOSANT : MODAL DES RÈGLES
+const RulesModal = ({ isOpen, onClose }) => {
+    if (!isOpen) return null;
+    return (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200">
+                <div className="bg-slate-50 px-5 py-4 border-b border-slate-100 flex justify-between items-center">
+                    <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                        <BookOpen className="w-5 h-5 text-blue-600" />
+                        Règles de Calcul
+                    </h3>
+                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
+                        <X size={20} />
+                    </button>
+                </div>
+                
+                <div className="p-6 text-xs space-y-6 overflow-y-auto max-h-[80vh]">
+                    
+                    {/* SECTION BLEUE */}
+                    <div className="space-y-2">
+                        <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_besoin} flex items-center gap-2 border-b border-blue-100 pb-1`}>
+                            <span className={`w-2 h-2 rounded-full ${COLORS.bg_besoin}`}></span> 1. Besoin Planifié
+                        </h4>
+                        <ul className="list-disc pl-4 space-y-1 text-slate-600">
+                            <li><span className="font-semibold text-slate-800">Source :</span> Calendrier (Snowflake).</li>
+                            <li><span className="font-semibold text-slate-800">Calcul :</span> Durée réelle saisie, sinon formule auto : <br/><code className="bg-slate-100 px-1 rounded">1h + (Nb Users - 5) × 10min</code>.</li>
+                            <li><span className="font-semibold text-slate-800">Règle d'Absorption :</span> Si l'événement tombe <i>pendant</i> un créneau Backoffice, il compte à <b>0h</b> (car inclus dans la capacité).</li>
+                        </ul>
+                    </div>
+
+                    {/* SECTION ORANGE */}
+                    <div className="space-y-2">
+                        <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_encours} flex items-center gap-2 border-b border-orange-100 pb-1`}>
+                            <span className={`w-2 h-2 rounded-full ${COLORS.bg_encours}`}></span> 2. Tickets "En Cours"
+                        </h4>
+                        <ul className="list-disc pl-4 space-y-1 text-slate-600">
+                            <li><span className="font-semibold text-slate-800">Source :</span> Outil de Ticketing.</li>
+                            <li><span className="font-semibold text-slate-800">Déduplication :</span> Si le client est déjà dans le planning (Bleu), le ticket vaut <b>0h</b>.</li>
+                            <li>
+                                <span className="font-semibold text-slate-800">Pondération (Charge) :</span>
+                                <ul className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1 ml-2">
+                                    <li>• Prêt / A planifier : <b>1.00 h</b></li>
+                                    <li>• Copie en cours : <b>0.75 h</b></li>
+                                    <li>• Standard / Autre : <b>0.50 h</b></li>
+                                    <li>• Prép. Tenant : <b>0.15 h</b></li>
+                                    <li>• Attente / Bloqué : <b>0.05 h</b></li>
+                                    <li>• Suspendu : <b>0.00 h</b></li>
+                                </ul>
+                            </li>
+                        </ul>
+                    </div>
+
+                    {/* SECTION VERTE */}
+                    <div className="space-y-2">
+                        <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_capacite} flex items-center gap-2 border-b border-emerald-100 pb-1`}>
+                            <span className={`w-2 h-2 rounded-full ${COLORS.bg_capacite}`}></span> 3. Capacité & Règles Spéciales
+                        </h4>
+                        <ul className="list-disc pl-4 space-y-1 text-slate-600">
+                            <li><span className="font-semibold text-slate-800">Source :</span> Événements "Backoffice".</li>
+                            <li><span className="font-semibold text-slate-800">Calcul Net :</span> Durée totale - (Rendez-vous clients superposés).</li>
+                            <li><span className="font-semibold text-red-600">Règle "Reporté le" :</span> Si une date de report existe, le ticket est <b>forcé</b> à cette date (le placement automatique est désactivé).</li>
+                        </ul>
+                    </div>
+
+                </div>
+                <div className="bg-slate-50 px-5 py-3 border-t border-slate-100 text-right">
+                    <button onClick={onClose} className="px-4 py-2 bg-white border border-slate-300 rounded-md text-slate-700 text-xs font-bold hover:bg-slate-100 transition-colors">
+                        Fermer
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const CustomTooltip = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
@@ -305,6 +380,9 @@ function MigrationDashboard() {
   const [isDetailListExpanded, setIsDetailListExpanded] = useState(true);
   const [isTableExpanded, setIsTableExpanded] = useState(false); 
   const [isTechChartExpanded, setIsTechChartExpanded] = useState(false); 
+  
+  // STATE MODAL REGLES
+  const [isRulesModalOpen, setIsRulesModalOpen] = useState(false);
 
   // --- DEBUG STATE ---
   const [debugData, setDebugData] = useState(null);
@@ -801,6 +879,15 @@ function MigrationDashboard() {
           </div>
         </div>
         <div className="flex gap-2 items-center">
+            {/* BOUTON INFO / RÈGLES */}
+            <button 
+                onClick={() => setIsRulesModalOpen(true)}
+                className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                title="Voir les règles de calcul"
+            >
+                <Info size={20} />
+            </button>
+
             <UserButton />
             <div className="relative">
                 <Filter className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
@@ -995,6 +1082,9 @@ function MigrationDashboard() {
           </div>
         )}
       </div>
+
+      {/* --- MODAL DES RÈGLES --- */}
+      <RulesModal isOpen={isRulesModalOpen} onClose={() => setIsRulesModalOpen(false)} />
 
       {/* --- DEBUG CONSOLE (Rétractable avec Onglets) --- */}
       <div className={`fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out ${isDebugOpen ? 'translate-y-0' : 'translate-y-[calc(100%-40px)]'}`}>
