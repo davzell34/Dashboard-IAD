@@ -1,11 +1,13 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart
+  BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  LineChart, Line, AreaChart, Area, ComposedChart, ReferenceLine, RadialBarChart, RadialBar
 } from 'recharts';
 import { 
-  Activity, Users, Clock, TrendingUp, Filter, Info, X, Table as TableIcon, 
-  ChevronDown, ChevronUp, FileText, Loader, ArrowUp, ArrowDown, Terminal, 
-  Settings, Save, RotateCcw // Icônes standards
+  Activity, Users, Clock, TrendingUp, AlertTriangle, CheckCircle, 
+  Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Loader,
+  ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout, Search, Layers, Server, FileSearch, Terminal,
+  Calculator, Database, BookOpen, Settings, Save, RotateCcw
 } from 'lucide-react';
 import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
 
@@ -42,7 +44,7 @@ const COLORS = {
 
 const clerkPubKey = process.env.REACT_APP_CLERK_PUBLISHABLE_KEY;
 
-// --- UTILITAIRES DE SECURITE (Anti-Crash) ---
+// --- UTILITAIRES DE SECURITE ---
 
 const safeString = (val) => (val !== null && val !== undefined) ? String(val).trim() : "";
 const safeUpper = (val) => safeString(val).toUpperCase();
@@ -158,13 +160,10 @@ const getOverlapHours = (range1, range2) => {
 
 // --- LOGIQUE PONDÉRATION (Utilise la config dynamique) ---
 const getRemainingLoad = (categorie, motif, weights) => {
-    // Sécurité si weights est undefined
     const w = weights || DEFAULT_WEIGHTS; 
-    
     const cleanCat = safeString(categorie).toLowerCase();
     const cleanMotif = safeString(motif);
 
-    // 1. Cas SANS CATÉGORIE
     if (cleanCat === "") {
         if (cleanMotif.startsWith("[IAD] - Préparation Avocatmail")) {
             return w.prepa_avocatmail_motif; 
@@ -172,7 +171,6 @@ const getRemainingLoad = (categorie, motif, weights) => {
         return 0; 
     }
 
-    // 2. Cas AVEC CATÉGORIE
     if (cleanCat.includes('prêt pour mise en place')) return w.pret_mise_en_place;
     if (cleanCat.includes('a planifier')) return w.a_planifier;
     if (cleanCat.includes('copie en cours')) return w.copie_en_cours;
@@ -190,20 +188,16 @@ const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeight
     const [tempWeights, setTempWeights] = useState(DEFAULT_WEIGHTS);
     const isAdmin = userEmail === ADMIN_EMAIL;
 
-    // Mise à jour du state local quand les props changent
     useEffect(() => {
-        if(currentWeights) {
-            setTempWeights(currentWeights);
-        }
+        if(currentWeights) setTempWeights(currentWeights);
     }, [currentWeights, isOpen]);
 
     const handleSave = async () => {
         try {
-            // Sauvegarde optimiste locale
-            onUpdateWeights(tempWeights);
+            onUpdateWeights(tempWeights); // Optimiste
             setIsEditing(false);
 
-            // Appel API pour persistance
+            // Note: le ?t= est inutile en POST, mais utile en GET
             const response = await fetch('/api/saveConfig', { 
                 method: 'POST', 
                 headers: { 'Content-Type': 'application/json' },
@@ -211,13 +205,14 @@ const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeight
             });
     
             if (response.ok) {
-                alert("✅ Config sauvegardée !");
+                alert("✅ Config sauvegardée ! (Faites F5 pour vérifier)");
             } else {
-                console.warn("Sauvegarde backend échouée, mais appliquée localement.");
+                console.warn("Erreur sauvegarde backend.");
+                alert("Erreur de sauvegarde (Vérifiez Console).");
             }
         } catch (e) {
             console.error("Erreur save:", e);
-            alert("Erreur de connexion, mais config appliquée pour cette session.");
+            alert("Erreur de connexion.");
         }
     };
 
@@ -230,7 +225,6 @@ const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeight
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 flex flex-col max-h-[90vh]">
-                
                 <div className="bg-slate-50 px-5 py-4 border-b border-slate-100 flex justify-between items-center shrink-0">
                     <h3 className="font-bold text-slate-800 flex items-center gap-2">
                         {isEditing ? <Settings className="w-5 h-5 text-purple-600" /> : <Info className="w-5 h-5 text-blue-600" />}
@@ -238,20 +232,23 @@ const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeight
                     </h3>
                     <button onClick={onClose}><X size={20} className="text-slate-400 hover:text-slate-600" /></button>
                 </div>
-                
                 <div className="p-6 text-xs space-y-6 overflow-y-auto">
                     <div className="space-y-2">
+                        <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_besoin} flex items-center gap-2 border-b border-blue-100 pb-1`}>1. Besoin Planifié</h4>
+                        <ul className="list-disc pl-4 space-y-1 text-slate-600">
+                            <li>Source : Calendrier (Snowflake).</li>
+                            <li>Calcul : Durée réelle, sinon <code className="bg-slate-100 px-1 rounded">1h + (Nb Users - 5) × 10min</code>.</li>
+                        </ul>
+                    </div>
+                    <div className="space-y-2">
                         <div className="flex justify-between items-center border-b border-orange-100 pb-1">
-                            <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_encours} flex items-center gap-2`}>
-                                PONDÉRATION (Charge Horaire)
-                            </h4>
+                            <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_encours} flex items-center gap-2`}>2. Tickets "En Cours"</h4>
                             {isAdmin && !isEditing && (
                                 <button onClick={() => setIsEditing(true)} className="flex items-center gap-1 text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded hover:bg-purple-200 transition-colors">
                                     <Settings size={12} /> Modifier
                                 </button>
                             )}
                         </div>
-
                         {isEditing ? (
                             <div className="grid grid-cols-1 gap-2 bg-slate-50 p-3 rounded border border-slate-200">
                                 {[
@@ -265,12 +262,7 @@ const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeight
                                 ].map((item) => (
                                     <div key={item.key} className="flex justify-between items-center">
                                         <span className="font-semibold text-slate-700">{item.label}</span>
-                                        <input 
-                                            type="number" step="0.05" 
-                                            value={tempWeights[item.key]} 
-                                            onChange={(e) => handleChange(item.key, e.target.value)}
-                                            className="w-20 text-right text-xs p-1 border rounded focus:ring-2 focus:ring-purple-500 outline-none"
-                                        />
+                                        <input type="number" step="0.05" value={tempWeights[item.key]} onChange={(e) => handleChange(item.key, e.target.value)} className="w-20 text-right text-xs p-1 border rounded focus:ring-2 focus:ring-purple-500 outline-none" />
                                     </div>
                                 ))}
                             </div>
@@ -285,22 +277,22 @@ const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeight
                             </ul>
                         )}
                     </div>
+                    <div className="space-y-2">
+                        <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_capacite} flex items-center gap-2 border-b border-emerald-100 pb-1`}>3. Capacité</h4>
+                        <ul className="list-disc pl-4 space-y-1 text-slate-600">
+                            <li>Source : Événements "Backoffice".</li>
+                            <li>Calcul : Durée nette (moins les RDV clients).</li>
+                        </ul>
+                    </div>
                 </div>
-
                 <div className="bg-slate-50 px-5 py-3 border-t border-slate-100 flex justify-end gap-2 shrink-0">
                     {isEditing ? (
                         <>
-                            <button onClick={() => { setIsEditing(false); setTempWeights(currentWeights); }} className="px-3 py-2 text-slate-600 hover:bg-slate-200 rounded transition-colors flex items-center gap-1">
-                                <RotateCcw size={14} /> Annuler
-                            </button>
-                            <button onClick={handleSave} className="px-4 py-2 bg-purple-600 text-white rounded-md text-xs font-bold hover:bg-purple-700 transition-colors flex items-center gap-1">
-                                <Save size={14} /> Enregistrer
-                            </button>
+                            <button onClick={() => { setIsEditing(false); setTempWeights(currentWeights); }} className="px-3 py-2 text-slate-600 hover:bg-slate-200 rounded transition-colors flex items-center gap-1"><RotateCcw size={14} /> Annuler</button>
+                            <button onClick={handleSave} className="px-4 py-2 bg-purple-600 text-white rounded-md text-xs font-bold hover:bg-purple-700 transition-colors flex items-center gap-1"><Save size={14} /> Enregistrer</button>
                         </>
                     ) : (
-                        <button onClick={onClose} className="px-4 py-2 bg-white border border-slate-300 rounded-md text-slate-700 text-xs font-bold hover:bg-slate-100 transition-colors">
-                            Fermer
-                        </button>
+                        <button onClick={onClose} className="px-4 py-2 bg-white border border-slate-300 rounded-md text-slate-700 text-xs font-bold hover:bg-slate-100 transition-colors">Fermer</button>
                     )}
                 </div>
             </div>
@@ -349,7 +341,7 @@ const SortableHeader = ({ label, sortKey, currentSort, onSort, align = 'left' })
     <th className={`px-2 py-2 font-semibold whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors group select-none text-${align}`} onClick={() => onSort(sortKey)}>
       <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start'}`}>
         {label}
-        <span className="text-slate-400">{isSorted ? (currentSort.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : (<ArrowDown size={12} className="opacity-0 group-hover:opacity-50" />)}</span>
+        <span className="text-slate-400">{isSorted ? (currentSort.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : (<ArrowUpDown size={12} className="opacity-0 group-hover:opacity-50" />)}</span>
       </div>
     </th>
   );
@@ -386,43 +378,61 @@ function MigrationDashboard() {
   const [isDebugOpen, setIsDebugOpen] = useState(false);
   const [debugTab, setDebugTab] = useState('calc'); 
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
-  
-  // STATE DE CONFIGURATION DES POIDS (Dynamique)
   const [weightsConfig, setWeightsConfig] = useState(DEFAULT_WEIGHTS);
 
   const { getToken } = useAuth(); 
 
+  // --- LE USE EFFECT BLINDÉ (DEBUG & CHARGEMENT) ---
   useEffect(() => {
     const fetchData = async () => {
+      console.log("📍 ÉTAPE 1 : Démarrage du chargement des données...");
       setIsLoading(true);
+      
       try {
         const token = await getToken();
+        console.log("📍 ÉTAPE 2 : Token récupéré.");
+        
         const headers = { Authorization: `Bearer ${token}` };
 
-        // 1. Récupération des Données Métiers
-        const response = await fetch('/api/getData', { headers });
-        const json = await response.json();
-        setDebugData(json);
-
-        // 2. Récupération de la Configuration (silencieuse)
+        // --- TEST CHARGEMENT CONFIG ---
+        console.log("📍 ÉTAPE 3 : Tentative appel /api/getConfig...");
         try {
-            const configRes = await fetch('/api/getConfig');
+            // !IMPORTANT : ?t=... force le navigateur à ne pas utiliser le cache !
+            const configRes = await fetch(`/api/getConfig?t=${Date.now()}`);
+            console.log(`📍 ÉTAPE 4 : Réponse reçue. Statut HTTP: ${configRes.status}`);
+
             if (configRes.ok) {
                 const configJson = await configRes.json();
+                console.log("✅ SUCCÈS - CONFIG REÇUE :", configJson);
+                
                 if (configJson && Object.keys(configJson).length > 0) {
                     setWeightsConfig(prev => ({ ...prev, ...configJson }));
                 }
+            } else {
+                const textError = await configRes.text();
+                console.error("❌ ERREUR API CONFIG (Pas 200 OK) :", configRes.status, textError);
             }
         } catch (e) {
-            console.warn("Mode hors-ligne pour la config:", e);
+            console.error("❌ CRASH APPEL API CONFIG :", e);
         }
 
-        if (!response.ok) throw new Error(json.error || `Erreur API`);
+        // --- CHARGEMENT DONNÉES MÉTIERS ---
+        console.log("📍 ÉTAPE 5 : Appel /api/getData...");
+        const response = await fetch('/api/getData', { headers });
+        const json = await response.json();
+
+        setDebugData(json); // Pour le panneau de debug
+
+        if (!response.ok) throw new Error(json.error || `Erreur API getData`);
+        
         if (json.backoffice) setBackofficeData(json.backoffice || []); 
         if (json.encours) setEncoursData(json.encours || []);
+        
+        console.log("📍 ÉTAPE 6 : Tout est chargé !");
         setIsLoading(false);
+
       } catch (err) {
-        console.error("❌ Erreur API :", err);
+        console.error("❌ ERREUR GLOBALE :", err);
         setDebugData({ error: err.message });
         setIsLoading(false);
       }
@@ -431,7 +441,6 @@ function MigrationDashboard() {
   }, [getToken]);
   
   const { detailedData, eventsData, planningCount, analysisPipeCount, availableMonths } = useMemo(() => {
-    // Initialisation
     const monthlyStats = new Map();
     const monthsSet = new Set(); 
     const techBackofficeSchedule = {}; 
@@ -439,7 +448,6 @@ function MigrationDashboard() {
     const allowedNeedEvents = ['Avocatmail - Analyse', 'Migration messagerie Adwin', 'Migration messagerie Adwin - analyse'];
     let allEvents = [];
 
-    // 1. TRAITEMENT BACKOFFICE
     if(Array.isArray(backofficeData)) {
       backofficeData.forEach(row => {
           const cleanRow = {};
@@ -540,7 +548,6 @@ function MigrationDashboard() {
         });
     });
 
-    // 2. TRAITEMENT ENCOURS
     let countReadyMiseEnPlace = 0;
     let countReadyAnalyse = 0; 
     const planningEventsList = [];
@@ -563,7 +570,6 @@ function MigrationDashboard() {
           
           const reportDate = parseDateSafe(reportDateStr);
 
-          // RÈGLE : Report > Déduplication
           if (!reportDate && scheduledClients.has(safeUpper(clientName))) {
               return; 
           }
@@ -578,9 +584,7 @@ function MigrationDashboard() {
               planningEventsList.push({ date: "N/A", tech, client: clientName, type: "Prêt pour Analyse", duration: 0, status: "A Planifier (Analyse)", color: "ready_analyse" });
           }
 
-          // APPEL AVEC CONFIGURATION DYNAMIQUE
           const remainingLoad = getRemainingLoad(categorie, motif, weightsConfig);
-          
           if (remainingLoad <= 0) return; 
 
           let targetDate = null;
