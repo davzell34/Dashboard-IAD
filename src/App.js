@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
 
-// --- CONFIGURATION PAR DÉFAUT ---
+// --- CONFIGURATION ---
 const TECH_LIST_DEFAULT = [
     "Zakaria AYAT", 
     "Jean-michel MESSIN", 
@@ -41,7 +41,7 @@ const COLORS = {
 };
 
 const clerkPubKey = process.env.REACT_APP_CLERK_PUBLISHABLE_KEY;
-const ADMIN_EMAIL = "david.zell@septeo.com"; // L'élue qui a le droit de modifier
+const ADMIN_EMAIL = "david.zell@septeo.com"; 
 
 // --- UTILITAIRES SECURISÉS ---
 
@@ -157,7 +157,6 @@ const getOverlapHours = (range1, range2) => {
 };
 
 // --- LOGIQUE PONDÉRATION DYNAMIQUE ---
-// Note: weights est passé en argument maintenant
 const getRemainingLoad = (categorie, motif, weights) => {
     const cleanCat = safeString(categorie).toLowerCase();
     const cleanMotif = safeString(motif);
@@ -192,12 +191,32 @@ const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeight
         setTempWeights(currentWeights);
     }, [currentWeights, isOpen]);
 
-    const handleSave = () => {
-        onUpdateWeights(tempWeights);
-        setIsEditing(false);
-        // ICI : Idéalement, faire un appel API pour sauvegarder en base de données
-        // fetch('/api/saveConfig', { method: 'POST', body: JSON.stringify(tempWeights) });
-        alert("Configuration mise à jour pour votre session. (Pour persistance globale, backend requis)");
+    const handleSave = async () => {
+        try {
+            // Appel à l'API pour sauvegarder en BDD via Clerk Metadata
+            const token = await window.Clerk.session.getToken();
+            
+            const response = await fetch('/api/saveConfig', { 
+                method: 'POST', 
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(tempWeights) 
+            });
+    
+            if (response.ok) {
+                onUpdateWeights(tempWeights); // Mise à jour locale immédiate
+                setIsEditing(false);
+                alert("✅ Configuration sauvegardée dans le Cloud ! Tous les utilisateurs verront ces changements.");
+            } else {
+                const errorData = await response.json();
+                alert(`Erreur : ${errorData.error || "Problème de droits"}`);
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Erreur de connexion au serveur.");
+        }
     };
 
     const handleChange = (key, value) => {
@@ -379,7 +398,7 @@ const PipeProgress = ({ label, count, colorClass, barColor }) => {
 // --- APPLICATION PRINCIPALE ---
 
 function MigrationDashboard() {
-  const { user } = useUser(); // Récupération de l'utilisateur
+  const { user } = useUser();
   const userEmail = user?.primaryEmailAddress?.emailAddress;
 
   const [backofficeData, setBackofficeData] = useState([]);
@@ -398,7 +417,7 @@ function MigrationDashboard() {
   const [debugTab, setDebugTab] = useState('calc'); 
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
   
-  // NOUVEAU : STATE DE CONFIGURATION DES POIDS
+  // STATE DE CONFIGURATION DES POIDS (Dynamique)
   const [weightsConfig, setWeightsConfig] = useState(DEFAULT_WEIGHTS);
 
   const { getToken } = useAuth(); 
@@ -408,11 +427,26 @@ function MigrationDashboard() {
       setIsLoading(true);
       try {
         const token = await getToken();
-        // Optionnel : Récupérer la config depuis l'API ici si elle existe
-        // const configRes = await fetch('/api/getConfig', ...);
-        const response = await fetch('/api/getData', { headers: { Authorization: `Bearer ${token}` } });
+        const headers = { Authorization: `Bearer ${token}` };
+
+        // 1. Récupération des Données Métiers
+        const response = await fetch('/api/getData', { headers });
         const json = await response.json();
         setDebugData(json);
+
+        // 2. Récupération de la Configuration (si l'API existe)
+        try {
+            const configRes = await fetch('/api/getConfig');
+            if (configRes.ok) {
+                const configJson = await configRes.json();
+                if (Object.keys(configJson).length > 0) {
+                    setWeightsConfig(prev => ({ ...prev, ...configJson }));
+                }
+            }
+        } catch (e) {
+            console.warn("Impossible de charger la config dynamique, usage des valeurs par défaut.");
+        }
+
         if (!response.ok) throw new Error(json.error || `Erreur API`);
         if (json.backoffice) setBackofficeData(json.backoffice || []); 
         if (json.encours) setEncoursData(json.encours || []);
@@ -622,7 +656,7 @@ function MigrationDashboard() {
     const sortedMonths = Array.from(monthsSet).sort().reverse(); 
 
     return { detailedData: detailedDataArray, eventsData: [...planningEventsList, ...finalEventsList], planningCount: countReadyMiseEnPlace, analysisPipeCount: countReadyAnalyse, availableMonths: sortedMonths };
-  }, [backofficeData, encoursData, techList, weightsConfig]); // Ajout de weightsConfig aux dépendances
+  }, [backofficeData, encoursData, techList, weightsConfig]); 
 
   // --- RENDU CHART & TABLEAUX ---
   const handleSort = (key) => {
@@ -736,19 +770,6 @@ function MigrationDashboard() {
       setShowPlanning(false);
       if (mode === 'months') { setSelectedMonth(null); } 
       else { if (!selectedMonth) { const current = getCurrentMonthKey(); setSelectedMonth(availableMonths.includes(current) ? current : availableMonths[0]); } }
-  };
-
-  const getStatusBadgeColor = (colorCode) => {
-      switch(colorCode) {
-          case 'need': return `bg-blue-50 ${COLORS.text_besoin} border border-blue-100`;
-          case 'encours': return `bg-orange-50 ${COLORS.text_encours} border border-orange-100`;
-          case 'capacity': return `bg-emerald-50 ${COLORS.text_capacite} border border-emerald-100`;
-          case 'ready_migr': return 'bg-indigo-50 text-indigo-600 border border-indigo-100';
-          case 'ready_analyse': return 'bg-cyan-50 text-cyan-600 border border-cyan-100';
-          case 'reporte': return `bg-red-50 ${COLORS.text_danger} border border-red-100`;
-          case 'attente': return `bg-slate-50 ${COLORS.text_neutral} border border-slate-200`;
-          default: return `bg-slate-50 ${COLORS.text_neutral}`;
-      }
   };
 
   return (
@@ -913,7 +934,7 @@ function MigrationDashboard() {
       <RulesModal 
         isOpen={isRulesModalOpen} 
         onClose={() => setIsRulesModalOpen(false)} 
-        userEmail={userEmail}
+        userEmail={userEmail} 
         currentWeights={weightsConfig}
         onUpdateWeights={setWeightsConfig}
       />
@@ -934,7 +955,7 @@ function MigrationDashboard() {
                 </div>
             </div>
             <div className="flex-1 overflow-auto p-4 font-mono text-xs bg-slate-950">
-                {debugTab === 'raw' ? (<div className="text-green-400">{debugData ? (<pre>{JSON.stringify(debugData, null, 2)}</pre>) : (<div className="flex items-center gap-2 text-slate-500"><Activity size={14} className="animate-spin" /> Chargement des données...</div>)}</div>) : (<div className="text-blue-200">Log console</div>)}
+                {debugTab === 'raw' ? (<div className="text-green-400">{debugData ? (<pre>{JSON.stringify(debugData, null, 2)}</pre>) : (<div className="flex items-center gap-2 text-slate-500"><Activity size={14} className="animate-spin" /> Chargement des données...</div>)}</div>) : (<div className="text-blue-200">{auditData ? (Object.keys(auditData).length > 0 ? (Object.entries(auditData).map(([week, events]) => (<div key={week} className="mb-4 border-b border-slate-800 pb-2"><h3 className="font-bold text-yellow-400 mb-1">Semaine {week} <span className="text-slate-500 font-normal">({events.length} événements)</span></h3><table className="w-full text-left text-[10px]"><thead><tr className="text-slate-500 border-b border-slate-800"><th className="pb-1">Date</th><th className="pb-1">Client</th><th className="pb-1">Technicien</th><th className="pb-1 text-right">Valeur (h)</th></tr></thead><tbody>{events.map((ev, i) => (<tr key={i} className="hover:bg-slate-900"><td className="py-0.5 text-slate-300">{ev.date}</td><td className="py-0.5 text-blue-300 truncate max-w-[200px]">{ev.client}</td><td className="py-0.5 text-slate-400">{ev.tech}</td><td className="py-0.5 text-right font-bold text-white">{ev.raw_besoin.toFixed(2)}</td></tr>))}<tr className="bg-slate-900 font-bold"><td colSpan="3" className="text-right py-1 text-slate-400">TOTAL SEMAINE :</td><td className="text-right py-1 text-green-400">{events.reduce((sum, e) => sum + e.raw_besoin, 0).toFixed(2)} h</td></tr></tbody></table></div>))) : (<div className="text-slate-500 italic p-4">Aucun événement "Besoin (Nouv)" trouvé pour ce mois.</div>)) : (<div className="flex flex-col items-center justify-center h-full text-slate-500 gap-2"><Calculator size={24} /><p>Sélectionnez un mois sur le graphique pour voir le détail hebdomadaire.</p></div>)}</div>)}
             </div>
         </div>
       </div>
