@@ -20,18 +20,28 @@ const TECH_LIST_DEFAULT = [
     "Roderick GAMONDES"
 ];
 
-// PALETTE ACCESSIBLE (DALTONISME)
+// NOUVELLE PALETTE "CLAIRE" (Bleu clair, Orange clair, Vert clair)
 const COLORS = {
-    besoin: "#2563eb",        // Bleu Roi (Blue-600) - Très lisible
-    encours: "#ea580c",       // Orange Vif (Orange-600) - Contraste fort avec le bleu
-    capacite: "#334155",      // Gris Anthracite (Slate-700) - Neutre et sombre
-    ok: "#2563eb",            // Bleu pour le positif
-    warning: "#ea580c",       // Orange pour l'alerte
-    bg_besoin: "bg-blue-600",
-    bg_encours: "bg-orange-600",
-    text_besoin: "text-blue-700",
-    text_encours: "text-orange-700",
-    text_capacite: "text-slate-700"
+    // Couleurs des barres (Hex pour Recharts)
+    besoin: "#60a5fa",        // Bleu clair (Blue-400)
+    encours: "#fb923c",       // Orange clair (Orange-400)
+    capacite: "#34d399",      // Vert clair (Emerald-400)
+
+    // Couleurs des indicateurs (Tooltip/KPI)
+    ok: "#34d399",            // Vert clair pour le positif
+    danger: "#f87171",        // Rouge clair pour le négatif/alerte
+
+    // Classes Tailwind pour les fonds et textes
+    bg_besoin: "bg-blue-400",
+    bg_encours: "bg-orange-400",
+    bg_capacite: "bg-emerald-400",
+
+    text_besoin: "text-blue-600",     // Un peu plus foncé pour la lisibilité sur fond blanc
+    text_encours: "text-orange-600",
+    text_capacite: "text-emerald-600",
+    text_ok: "text-emerald-600",
+    text_danger: "text-red-600",
+    text_neutral: "text-slate-600"
 };
 
 const clerkPubKey = process.env.REACT_APP_CLERK_PUBLISHABLE_KEY;
@@ -203,7 +213,7 @@ const CustomTooltip = ({ active, payload, label }) => {
             </div>
         </div>
 
-        <div className={`mt-3 pt-2 border-t border-slate-100 flex justify-between items-center font-bold text-sm ${isPositive ? 'text-blue-600' : 'text-orange-600'}`}>
+        <div className={`mt-3 pt-2 border-t border-slate-100 flex justify-between items-center font-bold text-sm ${isPositive ? COLORS.text_ok : COLORS.text_danger}`}>
             <span>DISPONIBLE :</span>
             <span>{isPositive ? '+' : ''}{dispo.toFixed(1)} h</span>
         </div>
@@ -225,8 +235,8 @@ const KPICard = ({ title, value, subtext, icon: Icon, colorClass, active, onClic
         {subtext && <p className={`text-xs font-medium ${colorClass}`}>{subtext}</p>}
       </div>
     </div>
-    <div className={`p-2 rounded-md ${colorClass.replace('text-', 'bg-').replace('600', '100').replace('700', '100')}`}>
-      <Icon className={`w-4 h-4 ${colorClass}`} />
+    <div className={`p-2 rounded-md ${colorClass.replace('text-', 'bg-').replace('600', '50')}`}>
+      <Icon className={`w-5 h-5 ${colorClass}`} />
     </div>
   </div>
 );
@@ -446,7 +456,7 @@ function MigrationDashboard() {
 
     [...boEvents, ...techEvents].forEach(ev => {
         if (ev.isBackoffice) {
-            ev.color = 'capacity'; // Slate
+            ev.color = 'capacity'; // Vert clair
             ev.status = ev.netCapacity < ev.duration 
                 ? `Prod BO (Net: ${ev.netCapacity.toFixed(1)}h)` 
                 : 'Production (Backoffice)';
@@ -457,7 +467,7 @@ function MigrationDashboard() {
                 ev.color = 'absorbed'; // Slate light
                 ev.status = 'Planifié pendant BO';
             } else {
-                ev.color = 'need'; // Blue
+                ev.color = 'need'; // Bleu clair
                 ev.status = 'Besoin (Analyse/Migr)';
                 addToStats(ev.month, ev.tech, ev.netNeed, 0, 0);
             }
@@ -538,7 +548,7 @@ function MigrationDashboard() {
             if (targetSlotTime) {
                 targetDate = new Date(targetSlotTime);
                 status = "Auto (Prochain BO)";
-                color = "encours"; // Orange
+                color = "encours"; // Orange clair
             } else {
                 targetDate = new Date(today);
                 targetDate.setDate(today.getDate() + 7);
@@ -751,14 +761,14 @@ function MigrationDashboard() {
 
   const getStatusBadgeColor = (colorCode) => {
       switch(colorCode) {
-          case 'need': return 'bg-blue-100 text-blue-800 border border-blue-200';
-          case 'encours': return 'bg-orange-100 text-orange-800 border border-orange-200';
-          case 'capacity': return 'bg-slate-200 text-slate-800 border border-slate-300';
-          case 'ready_migr': return 'bg-indigo-100 text-indigo-800 border border-indigo-200';
-          case 'ready_analyse': return 'bg-cyan-100 text-cyan-800 border border-cyan-200';
-          case 'reporte': return 'bg-red-100 text-red-800 border border-red-200';
-          case 'attente': return 'bg-slate-100 text-slate-500 border border-slate-200';
-          default: return 'bg-slate-100 text-slate-600';
+          case 'need': return `bg-blue-50 ${COLORS.text_besoin} border border-blue-100`;
+          case 'encours': return `bg-orange-50 ${COLORS.text_encours} border border-orange-100`;
+          case 'capacity': return `bg-emerald-50 ${COLORS.text_capacite} border border-emerald-100`;
+          case 'ready_migr': return 'bg-indigo-50 text-indigo-600 border border-indigo-100';
+          case 'ready_analyse': return 'bg-cyan-50 text-cyan-600 border border-cyan-100';
+          case 'reporte': return `bg-red-50 ${COLORS.text_danger} border border-red-100`;
+          case 'attente': return `bg-slate-50 ${COLORS.text_neutral} border border-slate-200`;
+          default: return `bg-slate-50 ${COLORS.text_neutral}`;
       }
   };
 
@@ -812,9 +822,9 @@ function MigrationDashboard() {
             <PipeProgress label="Prêt pour Analyse" count={analysisPipeCount} colorClass="text-cyan-600" barColor="bg-cyan-500" />
         </div>
 
-        <KPICard title="Besoin Total (h)" value={kpiStats.besoin.toFixed(0)} subtext={selectedMonth ? "Sur le mois" : "Annuel"} icon={Users} colorClass="text-slate-600" active={!!selectedMonth}/>
-        <KPICard title="Capacité (h)" value={kpiStats.capacite.toFixed(0)} subtext="Planifiée" icon={Clock} colorClass="text-slate-700" active={!!selectedMonth}/>
-        <KPICard title="Taux Couverture" value={`${kpiStats.ratio.toFixed(0)}%`} subtext="Capa. / Besoin" icon={TrendingUp} colorClass={kpiStats.ratio >= 100 ? "text-blue-600" : "text-orange-600"} active={!!selectedMonth}/>
+        <KPICard title="Besoin Total (h)" value={kpiStats.besoin.toFixed(0)} subtext={selectedMonth ? "Sur le mois" : "Annuel"} icon={Users} colorClass={COLORS.text_besoin} active={!!selectedMonth}/>
+        <KPICard title="Capacité (h)" value={kpiStats.capacite.toFixed(0)} subtext="Planifiée" icon={Clock} colorClass={COLORS.text_capacite} active={!!selectedMonth}/>
+        <KPICard title="Taux Couverture" value={`${kpiStats.ratio.toFixed(0)}%`} subtext="Capa. / Besoin" icon={TrendingUp} colorClass={kpiStats.ratio >= 100 ? COLORS.text_ok : COLORS.text_danger} active={!!selectedMonth}/>
       </div>
 
       {/* GRAPHIQUE PRINCIPAL */}
@@ -833,9 +843,9 @@ function MigrationDashboard() {
                 </div>
             )}
             <div className="flex gap-3 text-[10px] font-medium uppercase tracking-wider text-slate-500 ml-auto">
-                <div className="flex items-center gap-1"><span className={`w-2 h-2 rounded-full ${COLORS.bg_besoin}`}></span> Besoin (Bleu)</div>
-                <div className="flex items-center gap-1"><span className={`w-2 h-2 rounded-full ${COLORS.bg_encours}`}></span> En Cours (Orange)</div>
-                <div className="flex items-center gap-1"><span className="w-2 h-2 bg-slate-600 rounded-full"></span> Capacité (Gris)</div>
+                <div className="flex items-center gap-1"><span className={`w-2 h-2 rounded-full ${COLORS.bg_besoin}`}></span> Besoin (Bleu clair)</div>
+                <div className="flex items-center gap-1"><span className={`w-2 h-2 rounded-full ${COLORS.bg_encours}`}></span> En Cours (Orange clair)</div>
+                <div className="flex items-center gap-1"><span className={`w-2 h-2 rounded-full ${COLORS.bg_capacite}`}></span> Capacité (Vert clair)</div>
             </div>
         </div>
         <div className="h-64 w-full cursor-pointer">
@@ -963,7 +973,7 @@ function MigrationDashboard() {
                     <td className="px-4 py-2 text-right">{row.totalBesoinMois.toFixed(1)} h</td>
                     <td className={`px-4 py-2 text-right ${COLORS.text_encours}`}>{row.besoin_encours > 0 ? `${row.besoin_encours.toFixed(1)} h` : '-'}</td>
                     <td className={`px-4 py-2 text-right ${COLORS.text_capacite} font-medium`}>{row.capacite.toFixed(1)} h</td>
-                    <td className="px-4 py-2 text-right"><span className={`px-2 py-0.5 rounded text-xs font-medium ${row.soldeMensuel >= 0 ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>{row.soldeMensuel > 0 ? '+' : ''}{row.soldeMensuel.toFixed(1)} h</span></td>
+                    <td className="px-4 py-2 text-right"><span className={`px-2 py-0.5 rounded text-xs font-medium ${row.soldeMensuel >= 0 ? `bg-emerald-50 ${COLORS.text_ok}` : `bg-red-50 ${COLORS.text_danger}`}`}>{row.soldeMensuel > 0 ? '+' : ''}{row.soldeMensuel.toFixed(1)} h</span></td>
                   </tr>
                 ))}
               </tbody>
