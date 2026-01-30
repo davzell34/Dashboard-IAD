@@ -37,7 +37,6 @@ const normalizeTechName = (name, techList) => {
   return cleanName;
 };
 
-// CORRECTION DATE : Force le format YYYY-MM-DD en heure LOCALE
 const toLocalDateString = (date) => {
     if (!date) return "N/A";
     const offset = date.getTimezoneOffset();
@@ -159,6 +158,49 @@ const getRemainingLoad = (categorie) => {
 
 // --- COMPOSANTS UI ---
 
+// NOUVEAU COMPOSANT : TOOLTIP PERSONNALISÉ
+const CustomTooltip = ({ active, payload, label }) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    const besoin = data.besoin || 0;
+    const encours = data.besoin_encours || 0;
+    const capacite = data.capacite || 0;
+    
+    // Calcul de la capacité disponible (Capa - (Besoin + Encours))
+    const dispo = capacite - (besoin + encours);
+    const isPositive = dispo >= 0;
+
+    return (
+      <div className="bg-white p-3 border border-slate-200 shadow-xl rounded-lg text-xs min-w-[180px]">
+        <p className="font-bold text-slate-800 mb-2 border-b border-slate-100 pb-1">
+            {String(label).startsWith('S') ? label : formatMonth(data.month)}
+        </p>
+        
+        <div className="space-y-1">
+            <div className="flex justify-between items-center text-cyan-700">
+                <span>Besoin (Nouv) :</span>
+                <span className="font-bold">{besoin.toFixed(1)} h</span>
+            </div>
+            <div className="flex justify-between items-center text-amber-600">
+                <span>Besoin (En cours) :</span>
+                <span className="font-bold">{encours.toFixed(1)} h</span>
+            </div>
+            <div className="flex justify-between items-center text-purple-700">
+                <span>Capacité Planifiée :</span>
+                <span className="font-bold">{capacite.toFixed(1)} h</span>
+            </div>
+        </div>
+
+        <div className={`mt-3 pt-2 border-t border-slate-100 flex justify-between items-center font-bold text-sm ${isPositive ? 'text-emerald-600' : 'text-red-600'}`}>
+            <span>DISPONIBLE :</span>
+            <span>{isPositive ? '+' : ''}{dispo.toFixed(1)} h</span>
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
+
 const KPICard = ({ title, value, subtext, icon: Icon, colorClass, active, onClick }) => (
   <div 
     onClick={onClick}
@@ -232,7 +274,7 @@ function MigrationDashboard() {
   // --- DEBUG STATE ---
   const [debugData, setDebugData] = useState(null);
   const [isDebugOpen, setIsDebugOpen] = useState(false);
-  const [debugTab, setDebugTab] = useState('calc'); // 'raw' ou 'calc'
+  const [debugTab, setDebugTab] = useState('calc'); 
 
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
 
@@ -530,14 +572,12 @@ function MigrationDashboard() {
   const auditData = useMemo(() => {
       if (!selectedMonth) return null;
       
-      // Filtrer les événements qui constituent le "Besoin (Nouv)" pour ce mois
       const relevantEvents = eventsData.filter(e => 
           e.date.startsWith(selectedMonth) && 
           e.raw_besoin > 0 &&
           (selectedTech === 'Tous' || e.tech === selectedTech)
       );
 
-      // Grouper par semaine
       const grouped = {};
       relevantEvents.forEach(e => {
           const week = getWeekLabel(e.date);
@@ -790,15 +830,9 @@ function MigrationDashboard() {
                 interval={0} 
               />
               <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} />
-              <Tooltip 
-                cursor={{ fill: 'rgba(0,0,0,0.05)' }} 
-                contentStyle={{borderRadius: '6px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px', padding: '8px'}} 
-                labelFormatter={(val) => {
-                    if (String(val).startsWith('S')) return val; 
-                    return formatMonth(val);
-                }}
-                formatter={(value, name) => [`${parseFloat(value).toFixed(1)} h`, name === 'besoin' ? 'Besoin (Nouv.)' : name === 'besoin_encours' ? 'Besoin (En cours)' : name === 'capacite' ? 'Capacité' : name]} 
-              />
+              {/* REMPLACEMENT ICI PAR LE TOOLTIP PERSONNALISÉ */}
+              <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(0,0,0,0.05)' }} />
+              
               <Bar stackId="a" dataKey="besoin" fill="#06b6d4" radius={[0, 0, 0, 0]} barSize={selectedMonth ? 30 : 16} />
               <Bar stackId="a" dataKey="besoin_encours" fill="#f59e0b" radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
               <Bar stackId="b" dataKey="capacite" fill="#a855f7" radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
