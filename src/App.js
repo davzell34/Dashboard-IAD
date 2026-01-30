@@ -1,13 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  LineChart, Line, AreaChart, Area, ComposedChart, ReferenceLine, RadialBarChart, RadialBar
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart
 } from 'recharts';
 import { 
-  Activity, Users, Clock, TrendingUp, AlertTriangle, CheckCircle, 
-  Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Loader,
-  ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout, Search, Layers, Server, FileSearch, Terminal,
-  Calculator, Database, BookOpen, Settings, Save, RotateCcw
+  Activity, Users, Clock, TrendingUp, Filter, Info, X, Table as TableIcon, 
+  ChevronDown, ChevronUp, FileText, Loader, ArrowUp, ArrowDown, Terminal, 
+  Settings, Save, RotateCcw // Icônes standards
 } from 'lucide-react';
 import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
 
@@ -20,7 +18,9 @@ const TECH_LIST_DEFAULT = [
     "Roderick GAMONDES"
 ];
 
-// Configuration initiale (Valeurs par défaut)
+const ADMIN_EMAIL = "david.zell@septeo.com"; 
+
+// Configuration initiale (Valeurs par défaut robustes)
 const DEFAULT_WEIGHTS = {
     pret_mise_en_place: 1.0,
     a_planifier: 1.0,
@@ -29,7 +29,7 @@ const DEFAULT_WEIGHTS = {
     attente_bloque: 0.05,
     suspendu: 0.0,
     defaut_autre: 0.50,
-    prepa_avocatmail_motif: 0.50 // Exception motif
+    prepa_avocatmail_motif: 0.50 
 };
 
 const COLORS = {
@@ -41,26 +41,26 @@ const COLORS = {
 };
 
 const clerkPubKey = process.env.REACT_APP_CLERK_PUBLISHABLE_KEY;
-const ADMIN_EMAIL = "david.zell@septeo.com"; 
 
-// --- UTILITAIRES SECURISÉS ---
+// --- UTILITAIRES DE SECURITE (Anti-Crash) ---
 
-const safeString = (val) => val ? String(val).trim() : "";
+const safeString = (val) => (val !== null && val !== undefined) ? String(val).trim() : "";
 const safeUpper = (val) => safeString(val).toUpperCase();
 
 const normalizeTechName = (name, techList) => {
   const cleanName = safeString(name);
+  if (!cleanName) return "Inconnu";
   const upperName = cleanName.toUpperCase();
   for (const tech of techList) {
     if (tech.toUpperCase() === upperName) return tech;
     const lastName = tech.split(' ').pop().toUpperCase();
     if (upperName.includes(lastName)) return tech;
   }
-  return cleanName || "Inconnu";
+  return cleanName;
 };
 
 const toLocalDateString = (date) => {
-    if (!date) return "N/A";
+    if (!date || isNaN(date.getTime())) return "N/A";
     const offset = date.getTimezoneOffset();
     const localDate = new Date(date.getTime() - (offset * 60 * 1000));
     return localDate.toISOString().split('T')[0];
@@ -156,71 +156,73 @@ const getOverlapHours = (range1, range2) => {
     return (end - start) / (1000 * 60 * 60); 
 };
 
-// --- LOGIQUE PONDÉRATION DYNAMIQUE ---
+// --- LOGIQUE PONDÉRATION (Utilise la config dynamique) ---
 const getRemainingLoad = (categorie, motif, weights) => {
+    // Sécurité si weights est undefined
+    const w = weights || DEFAULT_WEIGHTS; 
+    
     const cleanCat = safeString(categorie).toLowerCase();
     const cleanMotif = safeString(motif);
 
     // 1. Cas SANS CATÉGORIE
     if (cleanCat === "") {
         if (cleanMotif.startsWith("[IAD] - Préparation Avocatmail")) {
-            return weights.prepa_avocatmail_motif; 
+            return w.prepa_avocatmail_motif; 
         }
         return 0; 
     }
 
     // 2. Cas AVEC CATÉGORIE
-    if (cleanCat.includes('prêt pour mise en place')) return weights.pret_mise_en_place;
-    if (cleanCat.includes('a planifier')) return weights.a_planifier;
-    if (cleanCat.includes('copie en cours')) return weights.copie_en_cours;
-    if (cleanCat.includes('préparation tenant')) return weights.preparation_tenant;
-    if (cleanCat.includes('attente') || cleanCat.includes('bloqué')) return weights.attente_bloque;
-    if (cleanCat.includes('suspendu')) return weights.suspendu;
+    if (cleanCat.includes('prêt pour mise en place')) return w.pret_mise_en_place;
+    if (cleanCat.includes('a planifier')) return w.a_planifier;
+    if (cleanCat.includes('copie en cours')) return w.copie_en_cours;
+    if (cleanCat.includes('préparation tenant')) return w.preparation_tenant;
+    if (cleanCat.includes('attente') || cleanCat.includes('bloqué')) return w.attente_bloque;
+    if (cleanCat.includes('suspendu')) return w.suspendu;
     
-    return weights.defaut_autre;
+    return w.defaut_autre;
 };
 
 // --- COMPOSANTS UI ---
 
 const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeights }) => {
     const [isEditing, setIsEditing] = useState(false);
-    const [tempWeights, setTempWeights] = useState(currentWeights);
+    const [tempWeights, setTempWeights] = useState(DEFAULT_WEIGHTS);
     const isAdmin = userEmail === ADMIN_EMAIL;
 
+    // Mise à jour du state local quand les props changent
     useEffect(() => {
-        setTempWeights(currentWeights);
+        if(currentWeights) {
+            setTempWeights(currentWeights);
+        }
     }, [currentWeights, isOpen]);
 
     const handleSave = async () => {
         try {
-            // Appel à l'API pour sauvegarder en BDD via Clerk Metadata
-            const token = await window.Clerk.session.getToken();
-            
+            // Sauvegarde optimiste locale
+            onUpdateWeights(tempWeights);
+            setIsEditing(false);
+
+            // Appel API pour persistance
             const response = await fetch('/api/saveConfig', { 
                 method: 'POST', 
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(tempWeights) 
             });
     
             if (response.ok) {
-                onUpdateWeights(tempWeights); // Mise à jour locale immédiate
-                setIsEditing(false);
-                alert("✅ Configuration sauvegardée dans le Cloud ! Tous les utilisateurs verront ces changements.");
+                alert("✅ Config sauvegardée !");
             } else {
-                const errorData = await response.json();
-                alert(`Erreur : ${errorData.error || "Problème de droits"}`);
+                console.warn("Sauvegarde backend échouée, mais appliquée localement.");
             }
         } catch (e) {
-            console.error(e);
-            alert("Erreur de connexion au serveur.");
+            console.error("Erreur save:", e);
+            alert("Erreur de connexion, mais config appliquée pour cette session.");
         }
     };
 
     const handleChange = (key, value) => {
-        setTempWeights(prev => ({ ...prev, [key]: parseFloat(value) }));
+        setTempWeights(prev => ({ ...prev, [key]: parseFloat(value) || 0 }));
     };
 
     if (!isOpen) return null;
@@ -229,43 +231,29 @@ const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeight
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 flex flex-col max-h-[90vh]">
                 
-                {/* Header */}
                 <div className="bg-slate-50 px-5 py-4 border-b border-slate-100 flex justify-between items-center shrink-0">
                     <h3 className="font-bold text-slate-800 flex items-center gap-2">
                         {isEditing ? <Settings className="w-5 h-5 text-purple-600" /> : <Info className="w-5 h-5 text-blue-600" />}
-                        {isEditing ? "Configuration Admin" : "Règles de Calcul"}
+                        {isEditing ? "Mode Édition" : "Règles de Calcul"}
                     </h3>
                     <button onClick={onClose}><X size={20} className="text-slate-400 hover:text-slate-600" /></button>
                 </div>
                 
-                {/* Content */}
                 <div className="p-6 text-xs space-y-6 overflow-y-auto">
-                    
-                    {/* SECTION BLEUE */}
-                    <div className="space-y-2">
-                        <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_besoin} flex items-center gap-2 border-b border-blue-100 pb-1`}>1. Besoin Planifié</h4>
-                        <ul className="list-disc pl-4 space-y-1 text-slate-600">
-                            <li>Source : Calendrier (Snowflake).</li>
-                            <li>Calcul : Durée réelle, sinon <code className="bg-slate-100 px-1 rounded">1h + (Nb Users - 5) × 10min</code>.</li>
-                        </ul>
-                    </div>
-
-                    {/* SECTION ORANGE (EDITABLE) */}
                     <div className="space-y-2">
                         <div className="flex justify-between items-center border-b border-orange-100 pb-1">
                             <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_encours} flex items-center gap-2`}>
-                                2. Tickets "En Cours"
+                                PONDÉRATION (Charge Horaire)
                             </h4>
                             {isAdmin && !isEditing && (
                                 <button onClick={() => setIsEditing(true)} className="flex items-center gap-1 text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded hover:bg-purple-200 transition-colors">
-                                    <Settings size={12} /> Configurer
+                                    <Settings size={12} /> Modifier
                                 </button>
                             )}
                         </div>
 
                         {isEditing ? (
                             <div className="grid grid-cols-1 gap-2 bg-slate-50 p-3 rounded border border-slate-200">
-                                <p className="text-slate-500 italic mb-2">Modifiez les temps (en heures) :</p>
                                 {[
                                     { label: "Prêt / A planifier", key: "pret_mise_en_place" },
                                     { label: "Préparation Tenant", key: "preparation_tenant" },
@@ -278,8 +266,7 @@ const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeight
                                     <div key={item.key} className="flex justify-between items-center">
                                         <span className="font-semibold text-slate-700">{item.label}</span>
                                         <input 
-                                            type="number" 
-                                            step="0.05" 
+                                            type="number" step="0.05" 
                                             value={tempWeights[item.key]} 
                                             onChange={(e) => handleChange(item.key, e.target.value)}
                                             className="w-20 text-right text-xs p-1 border rounded focus:ring-2 focus:ring-purple-500 outline-none"
@@ -288,35 +275,18 @@ const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeight
                                 ))}
                             </div>
                         ) : (
-                            <ul className="list-disc pl-4 space-y-1 text-slate-600">
-                                <li>Déduplication : Si client déjà planifié (Bleu) -> Ignoré (0h). <span className="text-red-500 font-bold">SAUF SI date de report fixée.</span></li>
-                                <li>Sans Catégorie : Ignoré, sauf motif <i>"[IAD] - Préparation Avocatmail"</i> ({currentWeights.prepa_avocatmail_motif}h).</li>
-                                <li className="mt-2">
-                                    <span className="font-semibold text-slate-800 border-b border-slate-200 pb-0.5">Pondération actuelle :</span>
-                                    <ul className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1 ml-2">
-                                        <li>• Prêt / Planif : <b>{currentWeights.pret_mise_en_place} h</b></li>
-                                        <li>• Prép. Tenant : <b>{currentWeights.preparation_tenant} h</b></li>
-                                        <li>• Copie en cours : <b>{currentWeights.copie_en_cours} h</b></li>
-                                        <li>• Standard : <b>{currentWeights.defaut_autre} h</b></li>
-                                        <li>• Attente : <b>{currentWeights.attente_bloque} h</b></li>
-                                        <li>• Suspendu : <b>{currentWeights.suspendu} h</b></li>
-                                    </ul>
-                                </li>
+                            <ul className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1 ml-2 text-slate-600">
+                                <li>• Prêt / Planif : <b>{tempWeights.pret_mise_en_place} h</b></li>
+                                <li>• Prép. Tenant : <b>{tempWeights.preparation_tenant} h</b></li>
+                                <li>• Copie en cours : <b>{tempWeights.copie_en_cours} h</b></li>
+                                <li>• Standard : <b>{tempWeights.defaut_autre} h</b></li>
+                                <li>• Attente : <b>{tempWeights.attente_bloque} h</b></li>
+                                <li>• Suspendu : <b>{tempWeights.suspendu} h</b></li>
                             </ul>
                         )}
                     </div>
-
-                    {/* SECTION VERTE */}
-                    <div className="space-y-2">
-                        <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_capacite} flex items-center gap-2 border-b border-emerald-100 pb-1`}>3. Capacité</h4>
-                        <ul className="list-disc pl-4 space-y-1 text-slate-600">
-                            <li>Source : Événements "Backoffice".</li>
-                            <li>Calcul : Durée nette (moins les RDV clients).</li>
-                        </ul>
-                    </div>
                 </div>
 
-                {/* Footer Actions */}
                 <div className="bg-slate-50 px-5 py-3 border-t border-slate-100 flex justify-end gap-2 shrink-0">
                     {isEditing ? (
                         <>
@@ -379,7 +349,7 @@ const SortableHeader = ({ label, sortKey, currentSort, onSort, align = 'left' })
     <th className={`px-2 py-2 font-semibold whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors group select-none text-${align}`} onClick={() => onSort(sortKey)}>
       <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start'}`}>
         {label}
-        <span className="text-slate-400">{isSorted ? (currentSort.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : (<ArrowUpDown size={12} className="opacity-0 group-hover:opacity-50" />)}</span>
+        <span className="text-slate-400">{isSorted ? (currentSort.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : (<ArrowDown size={12} className="opacity-0 group-hover:opacity-50" />)}</span>
       </div>
     </th>
   );
@@ -434,17 +404,17 @@ function MigrationDashboard() {
         const json = await response.json();
         setDebugData(json);
 
-        // 2. Récupération de la Configuration (si l'API existe)
+        // 2. Récupération de la Configuration (silencieuse)
         try {
             const configRes = await fetch('/api/getConfig');
             if (configRes.ok) {
                 const configJson = await configRes.json();
-                if (Object.keys(configJson).length > 0) {
+                if (configJson && Object.keys(configJson).length > 0) {
                     setWeightsConfig(prev => ({ ...prev, ...configJson }));
                 }
             }
         } catch (e) {
-            console.warn("Impossible de charger la config dynamique, usage des valeurs par défaut.");
+            console.warn("Mode hors-ligne pour la config:", e);
         }
 
         if (!response.ok) throw new Error(json.error || `Erreur API`);
@@ -772,6 +742,19 @@ function MigrationDashboard() {
       else { if (!selectedMonth) { const current = getCurrentMonthKey(); setSelectedMonth(availableMonths.includes(current) ? current : availableMonths[0]); } }
   };
 
+  const getStatusBadgeColor = (colorCode) => {
+      switch(colorCode) {
+          case 'need': return `bg-blue-50 ${COLORS.text_besoin} border border-blue-100`;
+          case 'encours': return `bg-orange-50 ${COLORS.text_encours} border border-orange-100`;
+          case 'capacity': return `bg-emerald-50 ${COLORS.text_capacite} border border-emerald-100`;
+          case 'ready_migr': return 'bg-indigo-50 text-indigo-600 border border-indigo-100';
+          case 'ready_analyse': return 'bg-cyan-50 text-cyan-600 border border-cyan-100';
+          case 'reporte': return `bg-red-50 ${COLORS.text_danger} border border-red-100`;
+          case 'attente': return `bg-slate-50 ${COLORS.text_neutral} border border-slate-200`;
+          default: return `bg-slate-50 ${COLORS.text_neutral}`;
+      }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500 relative">
       <header className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
@@ -955,7 +938,7 @@ function MigrationDashboard() {
                 </div>
             </div>
             <div className="flex-1 overflow-auto p-4 font-mono text-xs bg-slate-950">
-                {debugTab === 'raw' ? (<div className="text-green-400">{debugData ? (<pre>{JSON.stringify(debugData, null, 2)}</pre>) : (<div className="flex items-center gap-2 text-slate-500"><Activity size={14} className="animate-spin" /> Chargement des données...</div>)}</div>) : (<div className="text-blue-200">{auditData ? (Object.keys(auditData).length > 0 ? (Object.entries(auditData).map(([week, events]) => (<div key={week} className="mb-4 border-b border-slate-800 pb-2"><h3 className="font-bold text-yellow-400 mb-1">Semaine {week} <span className="text-slate-500 font-normal">({events.length} événements)</span></h3><table className="w-full text-left text-[10px]"><thead><tr className="text-slate-500 border-b border-slate-800"><th className="pb-1">Date</th><th className="pb-1">Client</th><th className="pb-1">Technicien</th><th className="pb-1 text-right">Valeur (h)</th></tr></thead><tbody>{events.map((ev, i) => (<tr key={i} className="hover:bg-slate-900"><td className="py-0.5 text-slate-300">{ev.date}</td><td className="py-0.5 text-blue-300 truncate max-w-[200px]">{ev.client}</td><td className="py-0.5 text-slate-400">{ev.tech}</td><td className="py-0.5 text-right font-bold text-white">{ev.raw_besoin.toFixed(2)}</td></tr>))}<tr className="bg-slate-900 font-bold"><td colSpan="3" className="text-right py-1 text-slate-400">TOTAL SEMAINE :</td><td className="text-right py-1 text-green-400">{events.reduce((sum, e) => sum + e.raw_besoin, 0).toFixed(2)} h</td></tr></tbody></table></div>))) : (<div className="text-slate-500 italic p-4">Aucun événement "Besoin (Nouv)" trouvé pour ce mois.</div>)) : (<div className="flex flex-col items-center justify-center h-full text-slate-500 gap-2"><Calculator size={24} /><p>Sélectionnez un mois sur le graphique pour voir le détail hebdomadaire.</p></div>)}</div>)}
+                {debugTab === 'raw' ? (<div className="text-green-400">{debugData ? (<pre>{JSON.stringify(debugData, null, 2)}</pre>) : (<div className="flex items-center gap-2 text-slate-500"><Activity size={14} className="animate-spin" /> Chargement des données...</div>)}</div>) : (<div className="text-blue-200">Log console</div>)}
             </div>
         </div>
       </div>
