@@ -20,6 +20,20 @@ const TECH_LIST_DEFAULT = [
     "Roderick GAMONDES"
 ];
 
+// PALETTE ACCESSIBLE (DALTONISME)
+const COLORS = {
+    besoin: "#2563eb",        // Bleu Roi (Blue-600) - Très lisible
+    encours: "#ea580c",       // Orange Vif (Orange-600) - Contraste fort avec le bleu
+    capacite: "#334155",      // Gris Anthracite (Slate-700) - Neutre et sombre
+    ok: "#2563eb",            // Bleu pour le positif
+    warning: "#ea580c",       // Orange pour l'alerte
+    bg_besoin: "bg-blue-600",
+    bg_encours: "bg-orange-600",
+    text_besoin: "text-blue-700",
+    text_encours: "text-orange-700",
+    text_capacite: "text-slate-700"
+};
+
 const clerkPubKey = process.env.REACT_APP_CLERK_PUBLISHABLE_KEY;
 
 // --- UTILITAIRES ---
@@ -158,7 +172,6 @@ const getRemainingLoad = (categorie) => {
 
 // --- COMPOSANTS UI ---
 
-// NOUVEAU COMPOSANT : TOOLTIP PERSONNALISÉ
 const CustomTooltip = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
@@ -166,7 +179,6 @@ const CustomTooltip = ({ active, payload, label }) => {
     const encours = data.besoin_encours || 0;
     const capacite = data.capacite || 0;
     
-    // Calcul de la capacité disponible (Capa - (Besoin + Encours))
     const dispo = capacite - (besoin + encours);
     const isPositive = dispo >= 0;
 
@@ -177,21 +189,21 @@ const CustomTooltip = ({ active, payload, label }) => {
         </p>
         
         <div className="space-y-1">
-            <div className="flex justify-between items-center text-cyan-700">
+            <div className={`flex justify-between items-center ${COLORS.text_besoin}`}>
                 <span>Besoin (Nouv) :</span>
                 <span className="font-bold">{besoin.toFixed(1)} h</span>
             </div>
-            <div className="flex justify-between items-center text-amber-600">
+            <div className={`flex justify-between items-center ${COLORS.text_encours}`}>
                 <span>Besoin (En cours) :</span>
                 <span className="font-bold">{encours.toFixed(1)} h</span>
             </div>
-            <div className="flex justify-between items-center text-purple-700">
+            <div className={`flex justify-between items-center ${COLORS.text_capacite}`}>
                 <span>Capacité Planifiée :</span>
                 <span className="font-bold">{capacite.toFixed(1)} h</span>
             </div>
         </div>
 
-        <div className={`mt-3 pt-2 border-t border-slate-100 flex justify-between items-center font-bold text-sm ${isPositive ? 'text-emerald-600' : 'text-red-600'}`}>
+        <div className={`mt-3 pt-2 border-t border-slate-100 flex justify-between items-center font-bold text-sm ${isPositive ? 'text-blue-600' : 'text-orange-600'}`}>
             <span>DISPONIBLE :</span>
             <span>{isPositive ? '+' : ''}{dispo.toFixed(1)} h</span>
         </div>
@@ -213,7 +225,7 @@ const KPICard = ({ title, value, subtext, icon: Icon, colorClass, active, onClic
         {subtext && <p className={`text-xs font-medium ${colorClass}`}>{subtext}</p>}
       </div>
     </div>
-    <div className={`p-2 rounded-md ${colorClass.replace('text-', 'bg-').replace('600', '100').replace('500', '100')}`}>
+    <div className={`p-2 rounded-md ${colorClass.replace('text-', 'bg-').replace('600', '100').replace('700', '100')}`}>
       <Icon className={`w-4 h-4 ${colorClass}`} />
     </div>
   </div>
@@ -434,7 +446,7 @@ function MigrationDashboard() {
 
     [...boEvents, ...techEvents].forEach(ev => {
         if (ev.isBackoffice) {
-            ev.color = 'purple';
+            ev.color = 'capacity'; // Slate
             ev.status = ev.netCapacity < ev.duration 
                 ? `Prod BO (Net: ${ev.netCapacity.toFixed(1)}h)` 
                 : 'Production (Backoffice)';
@@ -442,10 +454,10 @@ function MigrationDashboard() {
         } 
         else {
             if (ev.isAbsorbed) {
-                ev.color = 'slate';
+                ev.color = 'absorbed'; // Slate light
                 ev.status = 'Planifié pendant BO';
             } else {
-                ev.color = 'cyan';
+                ev.color = 'need'; // Blue
                 ev.status = 'Besoin (Analyse/Migr)';
                 addToStats(ev.month, ev.tech, ev.netNeed, 0, 0);
             }
@@ -493,7 +505,7 @@ function MigrationDashboard() {
             countReadyMiseEnPlace++;
             planningEventsList.push({
                 date: "N/A", tech, client: clientName, type: "Prêt pour Mise en Place",
-                duration: 0, status: "A Planifier (Migr)", color: "indigo"
+                duration: 0, status: "A Planifier (Migr)", color: "ready_migr"
             });
             return;
         }
@@ -502,7 +514,7 @@ function MigrationDashboard() {
             countReadyAnalyse++;
             planningEventsList.push({
                 date: "N/A", tech, client: clientName, type: "Prêt pour Analyse",
-                duration: 0, status: "A Planifier (Analyse)", color: "cyan"
+                duration: 0, status: "A Planifier (Analyse)", color: "ready_analyse"
             });
         }
 
@@ -517,7 +529,7 @@ function MigrationDashboard() {
         if (reportDate) {
             targetDate = reportDate;
             status = "Reporté";
-            color = "red";
+            color = "reporte";
         } 
         else {
             const techSlots = techBackofficeSchedule[tech] || [];
@@ -526,12 +538,12 @@ function MigrationDashboard() {
             if (targetSlotTime) {
                 targetDate = new Date(targetSlotTime);
                 status = "Auto (Prochain BO)";
-                color = "amber";
+                color = "encours"; // Orange
             } else {
                 targetDate = new Date(today);
                 targetDate.setDate(today.getDate() + 7);
                 status = "En attente (Pas de BO dispo)";
-                color = "slate";
+                color = "attente";
             }
         }
 
@@ -737,6 +749,19 @@ function MigrationDashboard() {
       }
   };
 
+  const getStatusBadgeColor = (colorCode) => {
+      switch(colorCode) {
+          case 'need': return 'bg-blue-100 text-blue-800 border border-blue-200';
+          case 'encours': return 'bg-orange-100 text-orange-800 border border-orange-200';
+          case 'capacity': return 'bg-slate-200 text-slate-800 border border-slate-300';
+          case 'ready_migr': return 'bg-indigo-100 text-indigo-800 border border-indigo-200';
+          case 'ready_analyse': return 'bg-cyan-100 text-cyan-800 border border-cyan-200';
+          case 'reporte': return 'bg-red-100 text-red-800 border border-red-200';
+          case 'attente': return 'bg-slate-100 text-slate-500 border border-slate-200';
+          default: return 'bg-slate-100 text-slate-600';
+      }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500 relative">
       
@@ -788,8 +813,8 @@ function MigrationDashboard() {
         </div>
 
         <KPICard title="Besoin Total (h)" value={kpiStats.besoin.toFixed(0)} subtext={selectedMonth ? "Sur le mois" : "Annuel"} icon={Users} colorClass="text-slate-600" active={!!selectedMonth}/>
-        <KPICard title="Capacité (h)" value={kpiStats.capacite.toFixed(0)} subtext="Planifiée" icon={Clock} colorClass="text-purple-600" active={!!selectedMonth}/>
-        <KPICard title="Taux Couverture" value={`${kpiStats.ratio.toFixed(0)}%`} subtext="Capa. / Besoin" icon={TrendingUp} colorClass={kpiStats.ratio >= 100 ? "text-emerald-600" : "text-red-600"} active={!!selectedMonth}/>
+        <KPICard title="Capacité (h)" value={kpiStats.capacite.toFixed(0)} subtext="Planifiée" icon={Clock} colorClass="text-slate-700" active={!!selectedMonth}/>
+        <KPICard title="Taux Couverture" value={`${kpiStats.ratio.toFixed(0)}%`} subtext="Capa. / Besoin" icon={TrendingUp} colorClass={kpiStats.ratio >= 100 ? "text-blue-600" : "text-orange-600"} active={!!selectedMonth}/>
       </div>
 
       {/* GRAPHIQUE PRINCIPAL */}
@@ -808,9 +833,9 @@ function MigrationDashboard() {
                 </div>
             )}
             <div className="flex gap-3 text-[10px] font-medium uppercase tracking-wider text-slate-500 ml-auto">
-                <div className="flex items-center gap-1"><span className="w-2 h-2 bg-cyan-500 rounded-full"></span> Besoin</div>
-                <div className="flex items-center gap-1"><span className="w-2 h-2 bg-amber-500 rounded-full"></span> En Cours</div>
-                <div className="flex items-center gap-1"><span className="w-2 h-2 bg-purple-500 rounded-full"></span> Capacité</div>
+                <div className="flex items-center gap-1"><span className={`w-2 h-2 rounded-full ${COLORS.bg_besoin}`}></span> Besoin (Bleu)</div>
+                <div className="flex items-center gap-1"><span className={`w-2 h-2 rounded-full ${COLORS.bg_encours}`}></span> En Cours (Orange)</div>
+                <div className="flex items-center gap-1"><span className="w-2 h-2 bg-slate-600 rounded-full"></span> Capacité (Gris)</div>
             </div>
         </div>
         <div className="h-64 w-full cursor-pointer">
@@ -833,9 +858,9 @@ function MigrationDashboard() {
               {/* REMPLACEMENT ICI PAR LE TOOLTIP PERSONNALISÉ */}
               <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(0,0,0,0.05)' }} />
               
-              <Bar stackId="a" dataKey="besoin" fill="#06b6d4" radius={[0, 0, 0, 0]} barSize={selectedMonth ? 30 : 16} />
-              <Bar stackId="a" dataKey="besoin_encours" fill="#f59e0b" radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
-              <Bar stackId="b" dataKey="capacite" fill="#a855f7" radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
+              <Bar stackId="a" dataKey="besoin" fill={COLORS.besoin} radius={[0, 0, 0, 0]} barSize={selectedMonth ? 30 : 16} />
+              <Bar stackId="a" dataKey="besoin_encours" fill={COLORS.encours} radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
+              <Bar stackId="b" dataKey="capacite" fill={COLORS.capacite} radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
@@ -872,7 +897,11 @@ function MigrationDashboard() {
                     <td className="px-2 py-1 font-medium text-slate-700 whitespace-nowrap truncate max-w-[200px]" title={event.client}>{event.client}</td>
                     <td className="px-2 py-1 text-slate-500 whitespace-nowrap">{event.type}</td>
                     <td className="px-2 py-1 text-right font-medium whitespace-nowrap">{event.duration > 0 ? event.duration.toFixed(2) : '-'}</td>
-                    <td className="px-2 py-1 text-center whitespace-nowrap"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${event.color === 'cyan' ? 'bg-cyan-100 text-cyan-700' : event.color === 'purple' ? 'bg-purple-100 text-purple-700' : event.color === 'indigo' ? 'bg-indigo-100 text-indigo-700' : event.color === 'amber' ? 'bg-amber-100 text-amber-700' : event.color === 'red' ? 'bg-red-100 text-red-700' : event.color === 'slate' ? 'bg-slate-200 text-slate-600' : 'bg-blue-100 text-blue-700'}`}>{event.status}</span></td>
+                    <td className="px-2 py-1 text-center whitespace-nowrap">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${getStatusBadgeColor(event.color)}`}>
+                            {event.status}
+                        </span>
+                    </td>
                   </tr>
                 ))}
                 {filteredAndSortedEvents.length === 0 && (<tr><td colSpan="6" className="px-4 py-8 text-center text-slate-400 italic">Aucun événement trouvé.</td></tr>)}
@@ -898,9 +927,9 @@ function MigrationDashboard() {
                         <XAxis type="number" hide />
                         <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fill: '#475569', fontSize: 10, fontWeight: 500}} width={120} />
                         <Tooltip cursor={{fill: 'transparent'}} contentStyle={{borderRadius: '6px', fontSize: '12px'}} formatter={(value) => [`${parseFloat(value).toFixed(1)} h`, '']} />
-                        <Bar dataKey="besoin" fill="#06b6d4" barSize={12} stackId="a" radius={[0, 0, 0, 0]} />
-                        <Bar dataKey="besoin_encours" fill="#f59e0b" barSize={12} stackId="a" radius={[0, 2, 2, 0]} />
-                        <Bar dataKey="capacite" fill="#a855f7" barSize={12} radius={[0, 2, 2, 0]} stackId="b" />
+                        <Bar dataKey="besoin" fill={COLORS.besoin} barSize={12} stackId="a" radius={[0, 0, 0, 0]} />
+                        <Bar dataKey="besoin_encours" fill={COLORS.encours} barSize={12} stackId="a" radius={[0, 2, 2, 0]} />
+                        <Bar dataKey="capacite" fill={COLORS.capacite} barSize={12} radius={[0, 2, 2, 0]} stackId="b" />
                         </BarChart>
                     </ResponsiveContainer>
                 </div>
@@ -922,8 +951,8 @@ function MigrationDashboard() {
                 <tr>
                     <th className="px-4 py-3 font-semibold">Mois</th>
                     <th className="px-4 py-3 font-semibold text-right">Besoin Total</th>
-                    <th className="px-4 py-3 font-semibold text-right text-amber-500">Dont En Cours</th>
-                    <th className="px-4 py-3 font-semibold text-right text-purple-600">Capacité</th> 
+                    <th className={`px-4 py-3 font-semibold text-right ${COLORS.text_encours}`}>Dont En Cours</th>
+                    <th className={`px-4 py-3 font-semibold text-right ${COLORS.text_capacite}`}>Capacité</th> 
                     <th className="px-4 py-3 font-semibold text-right">Ecart Mensuel</th>
                 </tr>
               </thead>
@@ -932,9 +961,9 @@ function MigrationDashboard() {
                   <tr key={row.month} className={`hover:bg-slate-50 transition-colors ${selectedMonth === row.month ? 'bg-blue-50/50' : ''}`}>
                     <td className="px-4 py-2 font-medium text-slate-800 capitalize">{row.label}</td>
                     <td className="px-4 py-2 text-right">{row.totalBesoinMois.toFixed(1)} h</td>
-                    <td className="px-4 py-2 text-right text-amber-500">{row.besoin_encours > 0 ? `${row.besoin_encours.toFixed(1)} h` : '-'}</td>
-                    <td className="px-4 py-2 text-right text-purple-600 font-medium">{row.capacite.toFixed(1)} h</td>
-                    <td className="px-4 py-2 text-right"><span className={`px-2 py-0.5 rounded text-xs font-medium ${row.soldeMensuel >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{row.soldeMensuel > 0 ? '+' : ''}{row.soldeMensuel.toFixed(1)} h</span></td>
+                    <td className={`px-4 py-2 text-right ${COLORS.text_encours}`}>{row.besoin_encours > 0 ? `${row.besoin_encours.toFixed(1)} h` : '-'}</td>
+                    <td className={`px-4 py-2 text-right ${COLORS.text_capacite} font-medium`}>{row.capacite.toFixed(1)} h</td>
+                    <td className="px-4 py-2 text-right"><span className={`px-2 py-0.5 rounded text-xs font-medium ${row.soldeMensuel >= 0 ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>{row.soldeMensuel > 0 ? '+' : ''}{row.soldeMensuel.toFixed(1)} h</span></td>
                   </tr>
                 ))}
               </tbody>
