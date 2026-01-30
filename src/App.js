@@ -158,25 +158,47 @@ const getOverlapHours = (range1, range2) => {
     return (end - start) / (1000 * 60 * 60); 
 };
 
-// --- LOGIQUE PONDÉRATION ---
+// --- NOUVELLE LOGIQUE DE PONDÉRATION AVEC EXCEPTION MOTIF ---
 const getRemainingLoad = (categorie, motif) => {
     // 1. GESTION DES TICKETS SANS CATÉGORIE
     if (!categorie || typeof categorie !== 'string' || categorie.trim() === '') {
         const cleanMotif = (motif || "").trim();
+        // Exception stricte sur le motif
         if (cleanMotif.startsWith("[IAD] - Préparation Avocatmail")) {
-            return 0.50; 
+            return 0.50; // Considéré comme "Autre"
         }
-        return 0; 
+        return 0; // Sinon, on ignore le ticket
     }
 
-    // 2. GESTION DES CATÉGORIES
+    // 2. GESTION DES CATÉGORIES EXISTANTES
     const cat = categorie.trim().toLowerCase();
 
-    if (cat.includes('prêt pour mise en place') || cat.includes('a planifier')) return 1.0;
-    if (cat.includes('copie en cours')) return 0.75;
-    if (cat.includes('préparation tenant')) return 0.15;
-    if (cat.includes('attente') || cat.includes('bloqué')) return 0.05;
-    if (cat.includes('suspendu')) return 0.0;
+    // 1.00 h
+    if (cat.includes('prêt pour mise en place') || cat.includes('a planifier')) {
+        return 1.0;
+    }
+
+    // 0.75 h
+    if (cat.includes('copie en cours')) {
+        return 0.75;
+    }
+
+    // 0.15 h
+    if (cat.includes('préparation tenant')) {
+        return 0.15;
+    }
+
+    // 0.05 h (Attente / Bloqué)
+    if (cat.includes('attente') || cat.includes('bloqué')) {
+        return 0.05;
+    }
+
+    // 0.00 h (Suspendu)
+    if (cat.includes('suspendu')) {
+        return 0.0;
+    }
+
+    // 0.50 h (Défaut / Autres)
     return 0.5;
 };
 
@@ -204,7 +226,7 @@ const RulesModal = ({ isOpen, onClose }) => {
                         </h4>
                         <ul className="list-disc pl-4 space-y-1 text-slate-600">
                             <li><span className="font-semibold text-slate-800">Source :</span> Calendrier (Snowflake).</li>
-                            <li><span className="font-semibold text-slate-800">Calcul :</span> Durée réelle, sinon <code className="bg-slate-100 px-1 rounded">1h + (Nb Users - 5) × 10min</code>.</li>
+                            <li><span className="font-semibold text-slate-800">Calcul :</span> Durée réelle saisie, sinon <code className="bg-slate-100 px-1 rounded">1h + (Nb Users - 5) × 10min</code>.</li>
                         </ul>
                     </div>
 
@@ -243,19 +265,34 @@ const CustomTooltip = ({ active, payload, label }) => {
     const besoin = data.besoin || 0;
     const encours = data.besoin_encours || 0;
     const capacite = data.capacite || 0;
+    
     const dispo = capacite - (besoin + encours);
     const isPositive = dispo >= 0;
 
     return (
       <div className="bg-white p-3 border border-slate-200 shadow-xl rounded-lg text-xs min-w-[180px]">
-        <p className="font-bold text-slate-800 mb-2 border-b border-slate-100 pb-1">{String(label).startsWith('S') ? label : formatMonth(data.month)}</p>
+        <p className="font-bold text-slate-800 mb-2 border-b border-slate-100 pb-1">
+            {String(label).startsWith('S') ? label : formatMonth(data.month)}
+        </p>
+        
         <div className="space-y-1">
-            <div className={`flex justify-between items-center ${COLORS.text_besoin}`}><span>Besoin (Nouv) :</span><span className="font-bold">{besoin.toFixed(1)} h</span></div>
-            <div className={`flex justify-between items-center ${COLORS.text_encours}`}><span>Besoin (En cours) :</span><span className="font-bold">{encours.toFixed(1)} h</span></div>
-            <div className={`flex justify-between items-center ${COLORS.text_capacite}`}><span>Capacité Planifiée :</span><span className="font-bold">{capacite.toFixed(1)} h</span></div>
+            <div className={`flex justify-between items-center ${COLORS.text_besoin}`}>
+                <span>Besoin (Nouv) :</span>
+                <span className="font-bold">{besoin.toFixed(1)} h</span>
+            </div>
+            <div className={`flex justify-between items-center ${COLORS.text_encours}`}>
+                <span>Besoin (En cours) :</span>
+                <span className="font-bold">{encours.toFixed(1)} h</span>
+            </div>
+            <div className={`flex justify-between items-center ${COLORS.text_capacite}`}>
+                <span>Capacité Planifiée :</span>
+                <span className="font-bold">{capacite.toFixed(1)} h</span>
+            </div>
         </div>
+
         <div className={`mt-3 pt-2 border-t border-slate-100 flex justify-between items-center font-bold text-sm ${isPositive ? COLORS.text_ok : COLORS.text_danger}`}>
-            <span>DISPONIBLE :</span><span>{isPositive ? '+' : ''}{dispo.toFixed(1)} h</span>
+            <span>DISPONIBLE :</span>
+            <span>{isPositive ? '+' : ''}{dispo.toFixed(1)} h</span>
         </div>
       </div>
     );
