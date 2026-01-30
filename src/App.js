@@ -20,23 +20,20 @@ const TECH_LIST_DEFAULT = [
     "Roderick GAMONDES"
 ];
 
-// NOUVELLE PALETTE "CLAIRE" (Bleu clair, Orange clair, Vert clair)
+// PALETTE "CLAIRE" (Bleu clair, Orange clair, Vert clair)
 const COLORS = {
-    // Couleurs des barres (Hex pour Recharts)
     besoin: "#60a5fa",        // Bleu clair (Blue-400)
     encours: "#fb923c",       // Orange clair (Orange-400)
     capacite: "#34d399",      // Vert clair (Emerald-400)
 
-    // Couleurs des indicateurs (Tooltip/KPI)
     ok: "#34d399",            // Vert clair pour le positif
     danger: "#f87171",        // Rouge clair pour le négatif/alerte
 
-    // Classes Tailwind pour les fonds et textes
     bg_besoin: "bg-blue-400",
     bg_encours: "bg-orange-400",
     bg_capacite: "bg-emerald-400",
 
-    text_besoin: "text-blue-600",     // Un peu plus foncé pour la lisibilité sur fond blanc
+    text_besoin: "text-blue-600",     
     text_encours: "text-orange-600",
     text_capacite: "text-emerald-600",
     text_ok: "text-emerald-600",
@@ -161,23 +158,39 @@ const getOverlapHours = (range1, range2) => {
     return (end - start) / (1000 * 60 * 60); 
 };
 
-// --- CALCUL AVANCEMENT ---
+// --- NOUVELLE LOGIQUE DE PONDÉRATION (FIXE) ---
 const getRemainingLoad = (categorie) => {
     if (!categorie) return 0.5; 
 
-    const cat = categorie.trim();
-    let completion = 0.5; 
+    const cat = categorie.trim().toLowerCase();
 
-    if (cat.includes('Préparation tenant 365')) completion = 0.15;
-    else if (cat.includes('Attente retour client')) completion = 0.05;
-    else if (cat.includes('Attente retour presta')) completion = 0.05;
-    else if (cat.includes('Bloqué cause client/presta')) completion = 0.05;
-    else if (cat.includes('Copie en cours')) completion = 0.75;
-    else if (cat.includes('Suspendu')) completion = 0.05;
-    else if (cat.includes('Prêt pour mise en place')) completion = 1.0; 
-    else if (cat.includes('A planifier')) completion = 1.0; 
-    
-    return Math.max(0, 1.0 * (1 - completion));
+    // 1.00 h
+    if (cat.includes('prêt pour mise en place') || cat.includes('a planifier')) {
+        return 1.0;
+    }
+
+    // 0.75 h
+    if (cat.includes('copie en cours')) {
+        return 0.75;
+    }
+
+    // 0.15 h
+    if (cat.includes('préparation tenant')) {
+        return 0.15;
+    }
+
+    // 0.05 h (Attente / Bloqué) - Valeur très faible pour ne pas charger le graph
+    if (cat.includes('attente') || cat.includes('bloqué')) {
+        return 0.05;
+    }
+
+    // 0.00 h (Suspendu)
+    if (cat.includes('suspendu')) {
+        return 0.0;
+    }
+
+    // 0.50 h (Défaut / Autres)
+    return 0.5;
 };
 
 // --- COMPOSANTS UI ---
@@ -528,8 +541,9 @@ function MigrationDashboard() {
             });
         }
 
+        // --- NOUVELLE FONCTION DE CALCUL CHARGE ---
         const remainingLoad = getRemainingLoad(categorie);
-        if (remainingLoad <= 0) return;
+        if (remainingLoad <= 0) return; // Si 0.00h (ex: Suspendu), on ne l'affiche pas dans le graph
 
         const reportDate = parseDateSafe(reportDateStr);
         let targetDate = null;
