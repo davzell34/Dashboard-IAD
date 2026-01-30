@@ -7,11 +7,11 @@ import {
   Activity, Users, Clock, TrendingUp, AlertTriangle, CheckCircle, 
   Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Loader,
   ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout, Search, Layers, Server, FileSearch, Terminal,
-  Calculator, Database, BookOpen
+  Calculator, Database, BookOpen, Settings, Save, RotateCcw
 } from 'lucide-react';
 import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
 
-// --- CONFIGURATION ---
+// --- CONFIGURATION PAR DÉFAUT ---
 const TECH_LIST_DEFAULT = [
     "Zakaria AYAT", 
     "Jean-michel MESSIN", 
@@ -19,6 +19,18 @@ const TECH_LIST_DEFAULT = [
     "Jean-Philippe SAUROIS", 
     "Roderick GAMONDES"
 ];
+
+// Configuration initiale (Valeurs par défaut)
+const DEFAULT_WEIGHTS = {
+    pret_mise_en_place: 1.0,
+    a_planifier: 1.0,
+    copie_en_cours: 0.15,
+    preparation_tenant: 0.75,
+    attente_bloque: 0.05,
+    suspendu: 0.0,
+    defaut_autre: 0.50,
+    prepa_avocatmail_motif: 0.50 // Exception motif
+};
 
 const COLORS = {
     besoin: "#60a5fa", encours: "#fb923c", capacite: "#34d399",
@@ -29,6 +41,7 @@ const COLORS = {
 };
 
 const clerkPubKey = process.env.REACT_APP_CLERK_PUBLISHABLE_KEY;
+const ADMIN_EMAIL = "david.zell@septeo.com"; // L'élue qui a le droit de modifier
 
 // --- UTILITAIRES SECURISÉS ---
 
@@ -143,81 +156,164 @@ const getOverlapHours = (range1, range2) => {
     return (end - start) / (1000 * 60 * 60); 
 };
 
-// --- LOGIQUE PONDÉRATION (MISE À JOUR) ---
-const getRemainingLoad = (categorie, motif) => {
+// --- LOGIQUE PONDÉRATION DYNAMIQUE ---
+// Note: weights est passé en argument maintenant
+const getRemainingLoad = (categorie, motif, weights) => {
     const cleanCat = safeString(categorie).toLowerCase();
     const cleanMotif = safeString(motif);
 
     // 1. Cas SANS CATÉGORIE
     if (cleanCat === "") {
-        // Exception stricte sur le motif
         if (cleanMotif.startsWith("[IAD] - Préparation Avocatmail")) {
-            return 0.50; // Considéré comme "Autre"
+            return weights.prepa_avocatmail_motif; 
         }
-        return 0; // Sinon ignoré
+        return 0; 
     }
 
-    // 2. Cas AVEC CATÉGORIE (Règles mises à jour)
-    if (cleanCat.includes('prêt pour mise en place') || cleanCat.includes('a planifier')) return 1.0;
+    // 2. Cas AVEC CATÉGORIE
+    if (cleanCat.includes('prêt pour mise en place')) return weights.pret_mise_en_place;
+    if (cleanCat.includes('a planifier')) return weights.a_planifier;
+    if (cleanCat.includes('copie en cours')) return weights.copie_en_cours;
+    if (cleanCat.includes('préparation tenant')) return weights.preparation_tenant;
+    if (cleanCat.includes('attente') || cleanCat.includes('bloqué')) return weights.attente_bloque;
+    if (cleanCat.includes('suspendu')) return weights.suspendu;
     
-    // Changement ici : Préparation Tenant passe à 0.75
-    if (cleanCat.includes('préparation tenant')) return 0.75;
-    
-    // Changement ici : Copie en cours passe à 0.15
-    if (cleanCat.includes('copie en cours')) return 0.15;
-    
-    if (cleanCat.includes('attente') || cleanCat.includes('bloqué')) return 0.05;
-    if (cleanCat.includes('suspendu')) return 0.0;
-    
-    return 0.5; // Défaut
+    return weights.defaut_autre;
 };
 
 // --- COMPOSANTS UI ---
 
-const RulesModal = ({ isOpen, onClose }) => {
+const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeights }) => {
+    const [isEditing, setIsEditing] = useState(false);
+    const [tempWeights, setTempWeights] = useState(currentWeights);
+    const isAdmin = userEmail === ADMIN_EMAIL;
+
+    useEffect(() => {
+        setTempWeights(currentWeights);
+    }, [currentWeights, isOpen]);
+
+    const handleSave = () => {
+        onUpdateWeights(tempWeights);
+        setIsEditing(false);
+        // ICI : Idéalement, faire un appel API pour sauvegarder en base de données
+        // fetch('/api/saveConfig', { method: 'POST', body: JSON.stringify(tempWeights) });
+        alert("Configuration mise à jour pour votre session. (Pour persistance globale, backend requis)");
+    };
+
+    const handleChange = (key, value) => {
+        setTempWeights(prev => ({ ...prev, [key]: parseFloat(value) }));
+    };
+
     if (!isOpen) return null;
+
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200">
-                <div className="bg-slate-50 px-5 py-4 border-b border-slate-100 flex justify-between items-center">
-                    <h3 className="font-bold text-slate-800 flex items-center gap-2"><Info className="w-5 h-5 text-blue-600" /> Règles de Calcul</h3>
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 flex flex-col max-h-[90vh]">
+                
+                {/* Header */}
+                <div className="bg-slate-50 px-5 py-4 border-b border-slate-100 flex justify-between items-center shrink-0">
+                    <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                        {isEditing ? <Settings className="w-5 h-5 text-purple-600" /> : <Info className="w-5 h-5 text-blue-600" />}
+                        {isEditing ? "Configuration Admin" : "Règles de Calcul"}
+                    </h3>
                     <button onClick={onClose}><X size={20} className="text-slate-400 hover:text-slate-600" /></button>
                 </div>
-                <div className="p-6 text-xs space-y-6 overflow-y-auto max-h-[80vh]">
+                
+                {/* Content */}
+                <div className="p-6 text-xs space-y-6 overflow-y-auto">
+                    
+                    {/* SECTION BLEUE */}
                     <div className="space-y-2">
                         <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_besoin} flex items-center gap-2 border-b border-blue-100 pb-1`}>1. Besoin Planifié</h4>
                         <ul className="list-disc pl-4 space-y-1 text-slate-600">
                             <li>Source : Calendrier (Snowflake).</li>
-                            <li>Calcul : Durée réelle ou <code className="bg-slate-100 px-1 rounded">1h + (Nb Users - 5) × 10min</code>.</li>
+                            <li>Calcul : Durée réelle, sinon <code className="bg-slate-100 px-1 rounded">1h + (Nb Users - 5) × 10min</code>.</li>
                         </ul>
                     </div>
+
+                    {/* SECTION ORANGE (EDITABLE) */}
                     <div className="space-y-2">
-                        <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_encours} flex items-center gap-2 border-b border-orange-100 pb-1`}>2. Tickets "En Cours"</h4>
-                        <ul className="list-disc pl-4 space-y-1 text-slate-600">
-                            <li>Déduplication : Si client déjà planifié (Bleu) -> Ignoré (0h). <span className="text-red-500 font-bold">SAUF SI date de report fixée.</span></li>
-                            <li>Sans Catégorie : Ignoré, sauf motif <i>"[IAD] - Préparation Avocatmail"</i> (0.50h).</li>
-                            <li className="mt-2">
-                                <span className="font-semibold text-slate-800 border-b border-slate-200 pb-0.5">Pondération (Charge) :</span>
-                                <ul className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1 ml-2">
-                                    <li>• Prêt / A planifier : <b>1.00 h</b></li>
-                                    <li>• Prép. Tenant : <b>0.75 h</b></li> {/* Mis à jour */}
-                                    <li>• Standard / Autre : <b>0.50 h</b></li>
-                                    <li>• Copie en cours : <b>0.15 h</b></li> {/* Mis à jour */}
-                                    <li>• Attente / Bloqué : <b>0.05 h</b></li>
-                                    <li>• Suspendu : <b>0.00 h</b></li>
-                                </ul>
-                            </li>
-                        </ul>
+                        <div className="flex justify-between items-center border-b border-orange-100 pb-1">
+                            <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_encours} flex items-center gap-2`}>
+                                2. Tickets "En Cours"
+                            </h4>
+                            {isAdmin && !isEditing && (
+                                <button onClick={() => setIsEditing(true)} className="flex items-center gap-1 text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded hover:bg-purple-200 transition-colors">
+                                    <Settings size={12} /> Configurer
+                                </button>
+                            )}
+                        </div>
+
+                        {isEditing ? (
+                            <div className="grid grid-cols-1 gap-2 bg-slate-50 p-3 rounded border border-slate-200">
+                                <p className="text-slate-500 italic mb-2">Modifiez les temps (en heures) :</p>
+                                {[
+                                    { label: "Prêt / A planifier", key: "pret_mise_en_place" },
+                                    { label: "Préparation Tenant", key: "preparation_tenant" },
+                                    { label: "Copie en cours", key: "copie_en_cours" },
+                                    { label: "Défaut / Autre", key: "defaut_autre" },
+                                    { label: "Attente / Bloqué", key: "attente_bloque" },
+                                    { label: "Suspendu", key: "suspendu" },
+                                    { label: "Motif: Prépa Avocatmail", key: "prepa_avocatmail_motif" },
+                                ].map((item) => (
+                                    <div key={item.key} className="flex justify-between items-center">
+                                        <span className="font-semibold text-slate-700">{item.label}</span>
+                                        <input 
+                                            type="number" 
+                                            step="0.05" 
+                                            value={tempWeights[item.key]} 
+                                            onChange={(e) => handleChange(item.key, e.target.value)}
+                                            className="w-20 text-right text-xs p-1 border rounded focus:ring-2 focus:ring-purple-500 outline-none"
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <ul className="list-disc pl-4 space-y-1 text-slate-600">
+                                <li>Déduplication : Si client déjà planifié (Bleu) -> Ignoré (0h). <span className="text-red-500 font-bold">SAUF SI date de report fixée.</span></li>
+                                <li>Sans Catégorie : Ignoré, sauf motif <i>"[IAD] - Préparation Avocatmail"</i> ({currentWeights.prepa_avocatmail_motif}h).</li>
+                                <li className="mt-2">
+                                    <span className="font-semibold text-slate-800 border-b border-slate-200 pb-0.5">Pondération actuelle :</span>
+                                    <ul className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1 ml-2">
+                                        <li>• Prêt / Planif : <b>{currentWeights.pret_mise_en_place} h</b></li>
+                                        <li>• Prép. Tenant : <b>{currentWeights.preparation_tenant} h</b></li>
+                                        <li>• Copie en cours : <b>{currentWeights.copie_en_cours} h</b></li>
+                                        <li>• Standard : <b>{currentWeights.defaut_autre} h</b></li>
+                                        <li>• Attente : <b>{currentWeights.attente_bloque} h</b></li>
+                                        <li>• Suspendu : <b>{currentWeights.suspendu} h</b></li>
+                                    </ul>
+                                </li>
+                            </ul>
+                        )}
                     </div>
+
+                    {/* SECTION VERTE */}
                     <div className="space-y-2">
                         <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_capacite} flex items-center gap-2 border-b border-emerald-100 pb-1`}>3. Capacité</h4>
                         <ul className="list-disc pl-4 space-y-1 text-slate-600">
-                            <li>Source : Événements "Tache de backoffice".</li>
+                            <li>Source : Événements "Backoffice".</li>
                             <li>Calcul : Durée nette (moins les RDV clients).</li>
                         </ul>
                     </div>
                 </div>
-                <div className="bg-slate-50 px-5 py-3 border-t border-slate-100 text-right"><button onClick={onClose} className="px-4 py-2 bg-white border border-slate-300 rounded-md text-slate-700 text-xs font-bold hover:bg-slate-100">Fermer</button></div>
+
+                {/* Footer Actions */}
+                <div className="bg-slate-50 px-5 py-3 border-t border-slate-100 flex justify-end gap-2 shrink-0">
+                    {isEditing ? (
+                        <>
+                            <button onClick={() => { setIsEditing(false); setTempWeights(currentWeights); }} className="px-3 py-2 text-slate-600 hover:bg-slate-200 rounded transition-colors flex items-center gap-1">
+                                <RotateCcw size={14} /> Annuler
+                            </button>
+                            <button onClick={handleSave} className="px-4 py-2 bg-purple-600 text-white rounded-md text-xs font-bold hover:bg-purple-700 transition-colors flex items-center gap-1">
+                                <Save size={14} /> Enregistrer
+                            </button>
+                        </>
+                    ) : (
+                        <button onClick={onClose} className="px-4 py-2 bg-white border border-slate-300 rounded-md text-slate-700 text-xs font-bold hover:bg-slate-100 transition-colors">
+                            Fermer
+                        </button>
+                    )}
+                </div>
             </div>
         </div>
     );
@@ -283,6 +379,9 @@ const PipeProgress = ({ label, count, colorClass, barColor }) => {
 // --- APPLICATION PRINCIPALE ---
 
 function MigrationDashboard() {
+  const { user } = useUser(); // Récupération de l'utilisateur
+  const userEmail = user?.primaryEmailAddress?.emailAddress;
+
   const [backofficeData, setBackofficeData] = useState([]);
   const [encoursData, setEncoursData] = useState([]);
   const [techList, setTechList] = useState(TECH_LIST_DEFAULT);
@@ -298,6 +397,10 @@ function MigrationDashboard() {
   const [isDebugOpen, setIsDebugOpen] = useState(false);
   const [debugTab, setDebugTab] = useState('calc'); 
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
+  
+  // NOUVEAU : STATE DE CONFIGURATION DES POIDS
+  const [weightsConfig, setWeightsConfig] = useState(DEFAULT_WEIGHTS);
+
   const { getToken } = useAuth(); 
 
   useEffect(() => {
@@ -305,6 +408,8 @@ function MigrationDashboard() {
       setIsLoading(true);
       try {
         const token = await getToken();
+        // Optionnel : Récupérer la config depuis l'API ici si elle existe
+        // const configRes = await fetch('/api/getConfig', ...);
         const response = await fetch('/api/getData', { headers: { Authorization: `Bearer ${token}` } });
         const json = await response.json();
         setDebugData(json);
@@ -330,7 +435,7 @@ function MigrationDashboard() {
     const allowedNeedEvents = ['Avocatmail - Analyse', 'Migration messagerie Adwin', 'Migration messagerie Adwin - analyse'];
     let allEvents = [];
 
-    // 1. TRAITEMENT BACKOFFICE (Source de vérité Planning)
+    // 1. TRAITEMENT BACKOFFICE
     if(Array.isArray(backofficeData)) {
       backofficeData.forEach(row => {
           const cleanRow = {};
@@ -381,7 +486,6 @@ function MigrationDashboard() {
         techBackofficeSchedule[t].sort((a, b) => a - b);
     });
 
-    // Gestion Collisions & Stats Backoffice
     const boEvents = allEvents.filter(e => e.isBackoffice);
     const techEvents = allEvents.filter(e => e.isNeed);
 
@@ -432,7 +536,7 @@ function MigrationDashboard() {
         });
     });
 
-    // 2. TRAITEMENT ENCOURS (Tickets)
+    // 2. TRAITEMENT ENCOURS
     let countReadyMiseEnPlace = 0;
     let countReadyAnalyse = 0; 
     const planningEventsList = [];
@@ -453,10 +557,9 @@ function MigrationDashboard() {
           const clientName = safeString(cleanRow['INTERLOCUTEUR'] || 'Client Inconnu');
           const reportDateStr = cleanRow['REPORTE_LE'];
           
-          // --- REGLE CRITIQUE : REPORT PASSE AVANT DEDUPLICATION ---
           const reportDate = parseDateSafe(reportDateStr);
 
-          // Si le client est deja planifié ET qu'il n'y a PAS de report forcé, on ignore (doublon)
+          // RÈGLE : Report > Déduplication
           if (!reportDate && scheduledClients.has(safeUpper(clientName))) {
               return; 
           }
@@ -471,7 +574,9 @@ function MigrationDashboard() {
               planningEventsList.push({ date: "N/A", tech, client: clientName, type: "Prêt pour Analyse", duration: 0, status: "A Planifier (Analyse)", color: "ready_analyse" });
           }
 
-          const remainingLoad = getRemainingLoad(categorie, motif);
+          // APPEL AVEC CONFIGURATION DYNAMIQUE
+          const remainingLoad = getRemainingLoad(categorie, motif, weightsConfig);
+          
           if (remainingLoad <= 0) return; 
 
           let targetDate = null;
@@ -503,7 +608,7 @@ function MigrationDashboard() {
               addToStats(targetMonth, tech, 0, remainingLoad, 0);
 
               let displayType = `Encours (${categorie || "Non classé"})`;
-              if (categorie === "" && remainingLoad === 0.5) displayType = "Prépa. Avocatmail (Auto)";
+              if (categorie === "" && remainingLoad === weightsConfig.prepa_avocatmail_motif) displayType = "Prépa. Avocatmail (Auto)";
 
               finalEventsList.push({
                   date: targetDateStr, tech, client: clientName, type: displayType, duration: remainingLoad,
@@ -517,7 +622,7 @@ function MigrationDashboard() {
     const sortedMonths = Array.from(monthsSet).sort().reverse(); 
 
     return { detailedData: detailedDataArray, eventsData: [...planningEventsList, ...finalEventsList], planningCount: countReadyMiseEnPlace, analysisPipeCount: countReadyAnalyse, availableMonths: sortedMonths };
-  }, [backofficeData, encoursData, techList]);
+  }, [backofficeData, encoursData, techList, weightsConfig]); // Ajout de weightsConfig aux dépendances
 
   // --- RENDU CHART & TABLEAUX ---
   const handleSort = (key) => {
@@ -805,7 +910,13 @@ function MigrationDashboard() {
         )}
       </div>
 
-      <RulesModal isOpen={isRulesModalOpen} onClose={() => setIsRulesModalOpen(false)} />
+      <RulesModal 
+        isOpen={isRulesModalOpen} 
+        onClose={() => setIsRulesModalOpen(false)} 
+        userEmail={userEmail}
+        currentWeights={weightsConfig}
+        onUpdateWeights={setWeightsConfig}
+      />
 
       <div className={`fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out ${isDebugOpen ? 'translate-y-0' : 'translate-y-[calc(100%-40px)]'}`}>
         <div className="bg-slate-900 border-t border-slate-700 shadow-2xl flex flex-col h-64">
