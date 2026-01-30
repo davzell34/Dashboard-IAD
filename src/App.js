@@ -1,15 +1,12 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  LineChart, Line, AreaChart, Area, ComposedChart, ReferenceLine, RadialBarChart, RadialBar
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart
 } from 'recharts';
 import { 
-  Activity, Users, Clock, TrendingUp, AlertTriangle, CheckCircle, 
-  Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Loader,
-  ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout, Search, Layers, Server, FileSearch, Terminal,
-  Calculator, Database, BookOpen
+  Activity, Users, Clock, TrendingUp, Filter, Info, X, Table as TableIcon, 
+  ChevronDown, ChevronUp, FileText, Loader, ArrowUp, ArrowDown, Terminal, Calculator
 } from 'lucide-react';
-import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
+import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useAuth } from "@clerk/clerk-react";
 
 // --- CONFIGURATION ---
 const TECH_LIST_DEFAULT = [
@@ -20,42 +17,30 @@ const TECH_LIST_DEFAULT = [
     "Roderick GAMONDES"
 ];
 
-// PALETTE "CLAIRE" (Bleu clair, Orange clair, Vert clair)
 const COLORS = {
-    besoin: "#60a5fa",        // Bleu clair (Blue-400)
-    encours: "#fb923c",       // Orange clair (Orange-400)
-    capacite: "#34d399",      // Vert clair (Emerald-400)
-
-    ok: "#34d399",            // Vert clair pour le positif
-    danger: "#f87171",        // Rouge clair pour le négatif/alerte
-
-    bg_besoin: "bg-blue-400",
-    bg_encours: "bg-orange-400",
-    bg_capacite: "bg-emerald-400",
-
-    text_besoin: "text-blue-600",     
-    text_encours: "text-orange-600",
-    text_capacite: "text-emerald-600",
-    text_ok: "text-emerald-600",
-    text_danger: "text-red-600",
-    text_neutral: "text-slate-600"
+    besoin: "#60a5fa", encours: "#fb923c", capacite: "#34d399",
+    ok: "#34d399", danger: "#f87171",
+    bg_besoin: "bg-blue-400", bg_encours: "bg-orange-400", bg_capacite: "bg-emerald-400",
+    text_besoin: "text-blue-600", text_encours: "text-orange-600", text_capacite: "text-emerald-600",
+    text_ok: "text-emerald-600", text_danger: "text-red-600", text_neutral: "text-slate-600"
 };
 
 const clerkPubKey = process.env.REACT_APP_CLERK_PUBLISHABLE_KEY;
 
-// --- UTILITAIRES ---
+// --- UTILITAIRES SECURISÉS ---
+
+const safeString = (val) => val ? String(val).trim() : "";
+const safeUpper = (val) => safeString(val).toUpperCase();
 
 const normalizeTechName = (name, techList) => {
-  if (!name || typeof name !== 'string') return "Inconnu";
-  const cleanName = name.trim();
+  const cleanName = safeString(name);
   const upperName = cleanName.toUpperCase();
-  
   for (const tech of techList) {
     if (tech.toUpperCase() === upperName) return tech;
     const lastName = tech.split(' ').pop().toUpperCase();
     if (upperName.includes(lastName)) return tech;
   }
-  return cleanName;
+  return cleanName || "Inconnu";
 };
 
 const toLocalDateString = (date) => {
@@ -67,20 +52,23 @@ const toLocalDateString = (date) => {
 
 const formatMonth = (dateStr) => {
   if (!dateStr) return '';
-  const [year, month] = dateStr.split('-');
-  const date = new Date(parseInt(year), parseInt(month) - 1, 1);
+  const parts = dateStr.split('-');
+  if(parts.length < 2) return dateStr;
+  const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, 1);
   return date.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
 };
 
 const formatMonthShort = (dateStr) => {
     if (!dateStr) return '';
-    const [year, month] = dateStr.split('-');
-    const date = new Date(parseInt(year), parseInt(month) - 1, 1);
+    const parts = dateStr.split('-');
+    if(parts.length < 2) return dateStr;
+    const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, 1);
     return date.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
 };
 
 const getWeekLabel = (dateStr) => {
     const date = new Date(dateStr);
+    if(isNaN(date.getTime())) return "S?";
     const firstDayOfYear = new Date(date.getFullYear(), 0, 1);
     const pastDaysOfYear = (date - firstDayOfYear) / 86400000;
     const weekNum = Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
@@ -89,15 +77,13 @@ const getWeekLabel = (dateStr) => {
 
 const getWeekRange = (dateStr) => {
     const date = new Date(dateStr);
+    if(isNaN(date.getTime())) return "";
     const day = date.getDay(); 
     const diffToMonday = date.getDate() - day + (day === 0 ? -6 : 1);
-    
     const monday = new Date(date);
     monday.setDate(diffToMonday);
-    
     const sunday = new Date(monday);
     sunday.setDate(monday.getDate() + 6);
-
     const format = (d) => d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
     return `${format(monday)} - ${format(sunday)}`;
 };
@@ -109,7 +95,7 @@ const getCurrentMonthKey = () => {
 
 const parseDateSafe = (dateStr) => {
     if (!dateStr) return null;
-    let cleanStr = dateStr;
+    let cleanStr = String(dateStr);
     if (cleanStr.includes('/')) {
         const parts = cleanStr.split(' ')[0].split('/'); 
         if (parts.length === 3) cleanStr = `${parts[2]}-${parts[1]}-${parts[0]}`;
@@ -133,20 +119,16 @@ const calculateDuration = (duree) => {
     return 0;
 };
 
-// --- GESTION DES PLAGES HORAIRES ---
 const getEventTimeRange = (dateObj, timeStr, durationHrs) => {
     if (!dateObj) return null;
-    if (!timeStr || typeof timeStr !== 'string' || !timeStr.includes(':')) return null;
-    
-    const [h, m] = timeStr.split(':').map(Number);
+    const sTime = safeString(timeStr);
+    if (!sTime.includes(':')) return null;
+    const [h, m] = sTime.split(':').map(Number);
     if (isNaN(h)) return null; 
-
     const start = new Date(dateObj);
     start.setHours(h, m || 0, 0, 0);
-    
     const end = new Date(start);
     end.setMinutes(start.getMinutes() + (durationHrs * 60));
-    
     return { start: start.getTime(), end: end.getTime() };
 };
 
@@ -158,48 +140,28 @@ const getOverlapHours = (range1, range2) => {
     return (end - start) / (1000 * 60 * 60); 
 };
 
-// --- NOUVELLE LOGIQUE DE PONDÉRATION AVEC EXCEPTION MOTIF ---
+// --- LOGIQUE PONDÉRATION (CORRIGÉE) ---
 const getRemainingLoad = (categorie, motif) => {
-    // 1. GESTION DES TICKETS SANS CATÉGORIE
-    if (!categorie || typeof categorie !== 'string' || categorie.trim() === '') {
-        const cleanMotif = (motif || "").trim();
+    const cleanCat = safeString(categorie).toLowerCase();
+    const cleanMotif = safeString(motif);
+
+    // 1. Cas SANS CATÉGORIE
+    if (cleanCat === "") {
         // Exception stricte sur le motif
         if (cleanMotif.startsWith("[IAD] - Préparation Avocatmail")) {
             return 0.50; // Considéré comme "Autre"
         }
-        return 0; // Sinon, on ignore le ticket
+        return 0; // Sinon ignoré
     }
 
-    // 2. GESTION DES CATÉGORIES EXISTANTES
-    const cat = categorie.trim().toLowerCase();
-
-    // 1.00 h
-    if (cat.includes('prêt pour mise en place') || cat.includes('a planifier')) {
-        return 1.0;
-    }
-
-    // 0.75 h
-    if (cat.includes('copie en cours')) {
-        return 0.75;
-    }
-
-    // 0.15 h
-    if (cat.includes('préparation tenant')) {
-        return 0.15;
-    }
-
-    // 0.05 h (Attente / Bloqué)
-    if (cat.includes('attente') || cat.includes('bloqué')) {
-        return 0.05;
-    }
-
-    // 0.00 h (Suspendu)
-    if (cat.includes('suspendu')) {
-        return 0.0;
-    }
-
-    // 0.50 h (Défaut / Autres)
-    return 0.5;
+    // 2. Cas AVEC CATÉGORIE
+    if (cleanCat.includes('prêt pour mise en place') || cleanCat.includes('a planifier')) return 1.0;
+    if (cleanCat.includes('copie en cours')) return 0.75;
+    if (cleanCat.includes('préparation tenant')) return 0.15;
+    if (cleanCat.includes('attente') || cleanCat.includes('bloqué')) return 0.05;
+    if (cleanCat.includes('suspendu')) return 0.0;
+    
+    return 0.5; // Défaut
 };
 
 // --- COMPOSANTS UI ---
@@ -210,50 +172,34 @@ const RulesModal = ({ isOpen, onClose }) => {
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200">
                 <div className="bg-slate-50 px-5 py-4 border-b border-slate-100 flex justify-between items-center">
-                    <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                        <BookOpen className="w-5 h-5 text-blue-600" />
-                        Règles de Calcul
-                    </h3>
-                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
-                        <X size={20} />
-                    </button>
+                    <h3 className="font-bold text-slate-800 flex items-center gap-2"><Info className="w-5 h-5 text-blue-600" /> Règles de Calcul</h3>
+                    <button onClick={onClose}><X size={20} className="text-slate-400 hover:text-slate-600" /></button>
                 </div>
-                
                 <div className="p-6 text-xs space-y-6 overflow-y-auto max-h-[80vh]">
                     <div className="space-y-2">
-                        <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_besoin} flex items-center gap-2 border-b border-blue-100 pb-1`}>
-                            <span className={`w-2 h-2 rounded-full ${COLORS.bg_besoin}`}></span> 1. Besoin Planifié
-                        </h4>
+                        <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_besoin} flex items-center gap-2 border-b border-blue-100 pb-1`}>1. Besoin Planifié</h4>
                         <ul className="list-disc pl-4 space-y-1 text-slate-600">
-                            <li><span className="font-semibold text-slate-800">Source :</span> Calendrier (Snowflake).</li>
-                            <li><span className="font-semibold text-slate-800">Calcul :</span> Durée réelle saisie, sinon <code className="bg-slate-100 px-1 rounded">1h + (Nb Users - 5) × 10min</code>.</li>
+                            <li>Source : Calendrier (Snowflake).</li>
+                            <li>Calcul : Durée réelle ou <code className="bg-slate-100 px-1 rounded">1h + (Nb Users - 5) × 10min</code>.</li>
                         </ul>
                     </div>
-
                     <div className="space-y-2">
-                        <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_encours} flex items-center gap-2 border-b border-orange-100 pb-1`}>
-                            <span className={`w-2 h-2 rounded-full ${COLORS.bg_encours}`}></span> 2. Tickets "En Cours"
-                        </h4>
+                        <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_encours} flex items-center gap-2 border-b border-orange-100 pb-1`}>2. Tickets "En Cours"</h4>
                         <ul className="list-disc pl-4 space-y-1 text-slate-600">
-                            <li><span className="font-semibold text-slate-800">Déduplication :</span> Si le client est déjà dans le planning, le ticket vaut <b>0h</b>. <br/><span className="text-red-500 font-bold">EXCEPTION :</span> Si une date "Reporté le" est fixée, le ticket est affiché (prioritaire).</li>
-                            <li><span className="font-semibold text-slate-800">Tickets Sans Catégorie :</span> Ignorés, <span className="text-red-600 font-bold">SAUF</span> si Motif = <i>"[IAD] - Préparation Avocatmail"</i> (0.50h).</li>
-                            <li>
-                                <span className="font-semibold text-slate-800">Pondération :</span>
-                                <ul className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1 ml-2">
-                                    <li>• Prêt / A planifier : <b>1.00 h</b></li>
-                                    <li>• Copie en cours : <b>0.75 h</b></li>
-                                    <li>• Standard / Autre : <b>0.50 h</b></li>
-                                    <li>• Prép. Tenant : <b>0.15 h</b></li>
-                                    <li>• Attente / Bloqué : <b>0.05 h</b></li>
-                                    <li>• Suspendu : <b>0.00 h</b></li>
-                                </ul>
-                            </li>
+                            <li>Déduplication : Si client déjà planifié (Bleu) -> Ignoré (0h). <span className="text-red-500 font-bold">SAUF SI date de report fixée.</span></li>
+                            <li>Sans Catégorie : Ignoré, sauf motif <i>"[IAD] - Préparation Avocatmail"</i> (0.50h).</li>
+                            <li>Charge : Prêt/Planif (1h), Copie (0.75h), Std (0.5h), Prép Tenant (0.15h), Attente (0.05h).</li>
+                        </ul>
+                    </div>
+                    <div className="space-y-2">
+                        <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_capacite} flex items-center gap-2 border-b border-emerald-100 pb-1`}>3. Capacité</h4>
+                        <ul className="list-disc pl-4 space-y-1 text-slate-600">
+                            <li>Source : Événements "Tache de backoffice".</li>
+                            <li>Calcul : Durée nette (moins les RDV clients).</li>
                         </ul>
                     </div>
                 </div>
-                <div className="bg-slate-50 px-5 py-3 border-t border-slate-100 text-right">
-                    <button onClick={onClose} className="px-4 py-2 bg-white border border-slate-300 rounded-md text-slate-700 text-xs font-bold hover:bg-slate-100 transition-colors">Fermer</button>
-                </div>
+                <div className="bg-slate-50 px-5 py-3 border-t border-slate-100 text-right"><button onClick={onClose} className="px-4 py-2 bg-white border border-slate-300 rounded-md text-slate-700 text-xs font-bold hover:bg-slate-100">Fermer</button></div>
             </div>
         </div>
     );
@@ -262,37 +208,18 @@ const RulesModal = ({ isOpen, onClose }) => {
 const CustomTooltip = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
-    const besoin = data.besoin || 0;
-    const encours = data.besoin_encours || 0;
-    const capacite = data.capacite || 0;
-    
-    const dispo = capacite - (besoin + encours);
+    const dispo = (data.capacite || 0) - ((data.besoin || 0) + (data.besoin_encours || 0));
     const isPositive = dispo >= 0;
-
     return (
       <div className="bg-white p-3 border border-slate-200 shadow-xl rounded-lg text-xs min-w-[180px]">
-        <p className="font-bold text-slate-800 mb-2 border-b border-slate-100 pb-1">
-            {String(label).startsWith('S') ? label : formatMonth(data.month)}
-        </p>
-        
+        <p className="font-bold text-slate-800 mb-2 border-b border-slate-100 pb-1">{String(label).startsWith('S') ? label : formatMonth(data.month)}</p>
         <div className="space-y-1">
-            <div className={`flex justify-between items-center ${COLORS.text_besoin}`}>
-                <span>Besoin (Nouv) :</span>
-                <span className="font-bold">{besoin.toFixed(1)} h</span>
-            </div>
-            <div className={`flex justify-between items-center ${COLORS.text_encours}`}>
-                <span>Besoin (En cours) :</span>
-                <span className="font-bold">{encours.toFixed(1)} h</span>
-            </div>
-            <div className={`flex justify-between items-center ${COLORS.text_capacite}`}>
-                <span>Capacité Planifiée :</span>
-                <span className="font-bold">{capacite.toFixed(1)} h</span>
-            </div>
+            <div className={`flex justify-between items-center ${COLORS.text_besoin}`}><span>Besoin (Nouv) :</span><span className="font-bold">{data.besoin?.toFixed(1)} h</span></div>
+            <div className={`flex justify-between items-center ${COLORS.text_encours}`}><span>Besoin (En cours) :</span><span className="font-bold">{data.besoin_encours?.toFixed(1)} h</span></div>
+            <div className={`flex justify-between items-center ${COLORS.text_capacite}`}><span>Capacité Planifiée :</span><span className="font-bold">{data.capacite?.toFixed(1)} h</span></div>
         </div>
-
         <div className={`mt-3 pt-2 border-t border-slate-100 flex justify-between items-center font-bold text-sm ${isPositive ? COLORS.text_ok : COLORS.text_danger}`}>
-            <span>DISPONIBLE :</span>
-            <span>{isPositive ? '+' : ''}{dispo.toFixed(1)} h</span>
+            <span>DISPONIBLE :</span><span>{isPositive ? '+' : ''}{dispo.toFixed(1)} h</span>
         </div>
       </div>
     );
@@ -319,7 +246,7 @@ const SortableHeader = ({ label, sortKey, currentSort, onSort, align = 'left' })
     <th className={`px-2 py-2 font-semibold whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors group select-none text-${align}`} onClick={() => onSort(sortKey)}>
       <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start'}`}>
         {label}
-        <span className="text-slate-400">{isSorted ? (currentSort.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : (<ArrowUpDown size={12} className="opacity-0 group-hover:opacity-50" />)}</span>
+        <span className="text-slate-400">{isSorted ? (currentSort.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : (<ArrowDown size={12} className="opacity-0 group-hover:opacity-50" />)}</span>
       </div>
     </th>
   );
@@ -329,13 +256,8 @@ const PipeProgress = ({ label, count, colorClass, barColor }) => {
     const percentage = Math.min((count / 15) * 100, 100);
     return (
         <div className="flex flex-col w-full">
-            <div className="flex justify-between items-end mb-1">
-                <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">{label}</span>
-                <span className={`text-sm font-bold ${colorClass}`}>{count}</span>
-            </div>
-            <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                <div className={`h-full rounded-full transition-all duration-500 ease-out ${barColor}`} style={{ width: `${percentage}%` }} />
-            </div>
+            <div className="flex justify-between items-end mb-1"><span className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">{label}</span><span className={`text-sm font-bold ${colorClass}`}>{count}</span></div>
+            <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden"><div className={`h-full rounded-full transition-all duration-500 ease-out ${barColor}`} style={{ width: `${percentage}%` }} /></div>
         </div>
     );
 };
@@ -347,22 +269,17 @@ function MigrationDashboard() {
   const [encoursData, setEncoursData] = useState([]);
   const [techList, setTechList] = useState(TECH_LIST_DEFAULT);
   const [isLoading, setIsLoading] = useState(true);
-  
   const [selectedTech, setSelectedTech] = useState('Tous');
   const [selectedMonth, setSelectedMonth] = useState(null);
   const [showPlanning, setShowPlanning] = useState(false); 
-
   const [isDetailListExpanded, setIsDetailListExpanded] = useState(true);
   const [isTableExpanded, setIsTableExpanded] = useState(false); 
   const [isTechChartExpanded, setIsTechChartExpanded] = useState(false); 
-  
   const [isRulesModalOpen, setIsRulesModalOpen] = useState(false);
   const [debugData, setDebugData] = useState(null);
   const [isDebugOpen, setIsDebugOpen] = useState(false);
   const [debugTab, setDebugTab] = useState('calc'); 
-
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
-
   const { getToken } = useAuth(); 
 
   useEffect(() => {
@@ -374,8 +291,8 @@ function MigrationDashboard() {
         const json = await response.json();
         setDebugData(json);
         if (!response.ok) throw new Error(json.error || `Erreur API`);
-        if (json.backoffice) setBackofficeData(json.backoffice); 
-        if (json.encours) setEncoursData(json.encours);
+        if (json.backoffice) setBackofficeData(json.backoffice || []); 
+        if (json.encours) setEncoursData(json.encours || []);
         setIsLoading(false);
       } catch (err) {
         console.error("❌ Erreur API :", err);
@@ -387,10 +304,7 @@ function MigrationDashboard() {
   }, [getToken]);
   
   const { detailedData, eventsData, planningCount, analysisPipeCount, availableMonths } = useMemo(() => {
-    if (backofficeData.length === 0 && encoursData.length === 0) {
-        return { detailedData: [], eventsData: [], planningCount: 0, analysisPipeCount: 0, availableMonths: [] };
-    }
-
+    // Initialisation
     const monthlyStats = new Map();
     const monthsSet = new Set(); 
     const techBackofficeSchedule = {}; 
@@ -398,71 +312,58 @@ function MigrationDashboard() {
     const allowedNeedEvents = ['Avocatmail - Analyse', 'Migration messagerie Adwin', 'Migration messagerie Adwin - analyse'];
     let allEvents = [];
 
-    // 1. BACKOFFICE (Bleu)
-    backofficeData.forEach(row => {
-        const cleanRow = {};
-        Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
-        
-        const typeEventRaw = cleanRow['EVENEMENT'] || "";
-        const typeEventLower = typeEventRaw.toLowerCase();
-        
-        const isBackoffice = typeEventLower.includes('tache de backoffice avocatmail');
-        const isNeed = allowedNeedEvents.includes(typeEventRaw) || 
-                       (typeEventLower.includes("avocatmail") && typeEventLower.includes("analyse"));
+    // 1. TRAITEMENT BACKOFFICE (Source de vérité Planning)
+    if(Array.isArray(backofficeData)) {
+      backofficeData.forEach(row => {
+          const cleanRow = {};
+          Object.keys(row || {}).forEach(k => cleanRow[k.trim()] = row[k]);
+          
+          const typeEventRaw = safeString(cleanRow['EVENEMENT']);
+          const typeEventLower = typeEventRaw.toLowerCase();
+          
+          const isBackoffice = typeEventLower.includes('tache de backoffice avocatmail');
+          const isNeed = allowedNeedEvents.includes(typeEventRaw) || 
+                        (typeEventLower.includes("avocatmail") && typeEventLower.includes("analyse"));
 
-        if (!isBackoffice && !isNeed) return;
+          if (!isBackoffice && !isNeed) return;
 
-        const resp = cleanRow['RESPONSABLE'];
-        const tech = normalizeTechName(resp, techList);
-        if (!techList.includes(tech)) return;
+          const tech = normalizeTechName(cleanRow['RESPONSABLE'], techList);
+          if (!techList.includes(tech)) return;
 
-        const dateStr = cleanRow['DATE'];
-        const timeStr = cleanRow['HEURE']; 
-        const duree = cleanRow['DUREE_HRS'];
-        const dateEvent = parseDateSafe(dateStr);
-        if(!dateEvent) return;
-        
-        const dateFormatted = toLocalDateString(dateEvent);
-        const month = dateFormatted.substring(0, 7);
-        const duration = calculateDuration(duree);
-        const timeRange = getEventTimeRange(dateEvent, timeStr, duration);
-        
-        const dossier = cleanRow['DOSSIER'] || cleanRow['LIBELLE'] || 'Client Inconnu';
-        const nbUsers = cleanRow['NB_USERS'] || cleanRow['USER'] || '1';
+          const dateEvent = parseDateSafe(cleanRow['DATE']);
+          if(!dateEvent) return;
+          
+          const dateFormatted = toLocalDateString(dateEvent);
+          const month = dateFormatted.substring(0, 7);
+          const duration = calculateDuration(cleanRow['DUREE_HRS']);
+          const timeRange = getEventTimeRange(dateEvent, cleanRow['HEURE'], duration);
+          
+          const dossier = safeString(cleanRow['DOSSIER'] || cleanRow['LIBELLE'] || 'Client Inconnu');
+          const nbUsers = cleanRow['NB_USERS'] || cleanRow['USER'] || '1';
 
-        if (isBackoffice) {
-            if (!techBackofficeSchedule[tech]) techBackofficeSchedule[tech] = [];
-            techBackofficeSchedule[tech].push(dateEvent.getTime());
-        }
+          if (isBackoffice) {
+              if (!techBackofficeSchedule[tech]) techBackofficeSchedule[tech] = [];
+              techBackofficeSchedule[tech].push(dateEvent.getTime());
+          }
 
-        if (dossier && dossier !== 'Client Inconnu') {
-            scheduledClients.add(dossier.trim().toUpperCase());
-        }
+          if (dossier !== 'Client Inconnu' && !isBackoffice) {
+              scheduledClients.add(safeUpper(dossier));
+          }
 
-        allEvents.push({
-            id: Math.random(),
-            date: dateFormatted,
-            month,
-            tech,
-            typeRaw: typeEventRaw,
-            duration,
-            isBackoffice,
-            isNeed,
-            timeRange,
-            dossier,
-            nbUsers,
-            netCapacity: isBackoffice ? duration : 0, 
-            netNeed: 0, 
-            isAbsorbed: false,
-            status: '',
-            color: ''
-        });
-    });
+          allEvents.push({
+              id: Math.random(), date: dateFormatted, month, tech, typeRaw: typeEventRaw, duration,
+              isBackoffice, isNeed, timeRange, dossier, nbUsers,
+              netCapacity: isBackoffice ? duration : 0, netNeed: 0, isAbsorbed: false,
+              status: '', color: ''
+          });
+      });
+    }
 
     Object.keys(techBackofficeSchedule).forEach(t => {
         techBackofficeSchedule[t].sort((a, b) => a - b);
     });
 
+    // Gestion Collisions & Stats Backoffice
     const boEvents = allEvents.filter(e => e.isBackoffice);
     const techEvents = allEvents.filter(e => e.isNeed);
 
@@ -504,14 +405,8 @@ function MigrationDashboard() {
             ev.status = ev.netCapacity < ev.duration ? `Prod BO (Net: ${ev.netCapacity.toFixed(1)}h)` : 'Production (Backoffice)';
             addToStats(ev.month, ev.tech, 0, 0, ev.netCapacity);
         } else {
-            if (ev.isAbsorbed) {
-                ev.color = 'absorbed'; 
-                ev.status = 'Planifié pendant BO';
-            } else {
-                ev.color = 'need'; 
-                ev.status = 'Besoin (Analyse/Migr)';
-                addToStats(ev.month, ev.tech, ev.netNeed, 0, 0);
-            }
+            if (ev.isAbsorbed) { ev.color = 'absorbed'; ev.status = 'Planifié pendant BO'; } 
+            else { ev.color = 'need'; ev.status = 'Besoin (Analyse/Migr)'; addToStats(ev.month, ev.tech, ev.netNeed, 0, 0); }
         }
         finalEventsList.push({
             date: ev.date, tech: ev.tech, client: ev.dossier, type: ev.typeRaw, duration: ev.duration,
@@ -519,7 +414,7 @@ function MigrationDashboard() {
         });
     });
 
-    // 4. ENCOURS (Orange)
+    // 2. TRAITEMENT ENCOURS (Tickets)
     let countReadyMiseEnPlace = 0;
     let countReadyAnalyse = 0; 
     const planningEventsList = [];
@@ -527,78 +422,78 @@ function MigrationDashboard() {
     today.setHours(0, 0, 0, 0);
     const todayTime = today.getTime();
 
-    encoursData.forEach(row => {
-        const cleanRow = {};
-        Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
-        const techNameRaw = cleanRow['RESPONSABLE'];
-        const categorie = cleanRow['CATEGORIE'];
-        const motif = cleanRow['MOTIF'];
-        const reportDateStr = cleanRow['REPORTE_LE'];
-        const clientName = cleanRow['INTERLOCUTEUR'] || 'Client Inconnu';
-        const tech = normalizeTechName(techNameRaw, techList);
-        
-        if (!techList.includes(tech)) return;
+    if(Array.isArray(encoursData)) {
+      encoursData.forEach(row => {
+          const cleanRow = {};
+          Object.keys(row || {}).forEach(k => cleanRow[k.trim()] = row[k]);
+          
+          const tech = normalizeTechName(cleanRow['RESPONSABLE'], techList);
+          if (!techList.includes(tech)) return;
 
-        // CALCUL DE LA DATE DE REPORT
-        const reportDate = parseDateSafe(reportDateStr);
+          const categorie = safeString(cleanRow['CATEGORIE']);
+          const motif = safeString(cleanRow['MOTIF']);
+          const clientName = safeString(cleanRow['INTERLOCUTEUR'] || 'Client Inconnu');
+          const reportDateStr = cleanRow['REPORTE_LE'];
+          
+          // --- REGLE CRITIQUE : REPORT PASSE AVANT DEDUPLICATION ---
+          const reportDate = parseDateSafe(reportDateStr);
 
-        // --- CORRECTION CRITIQUE ICI ---
-        // DÉDUPLICATION : On ignore le ticket SI le client existe déjà en bleu...
-        // ... SAUF SI une date de report est fixée (priorité à l'action manuelle).
-        if (!reportDate && scheduledClients.has(clientName.trim().toUpperCase())) {
-            return;
-        }
+          // Si le client est deja planifié ET qu'il n'y a PAS de report forcé, on ignore (doublon)
+          if (!reportDate && scheduledClients.has(safeUpper(clientName))) {
+              return; 
+          }
 
-        if (categorie === 'Prêt pour mise en place') {
-            countReadyMiseEnPlace++;
-            planningEventsList.push({ date: "N/A", tech, client: clientName, type: "Prêt pour Mise en Place", duration: 0, status: "A Planifier (Migr)", color: "ready_migr" });
-            return;
-        }
-        if (categorie === 'Prêt pour analyse' || categorie === 'A Planifier (Analyse)') {
-            countReadyAnalyse++;
-            planningEventsList.push({ date: "N/A", tech, client: clientName, type: "Prêt pour Analyse", duration: 0, status: "A Planifier (Analyse)", color: "ready_analyse" });
-        }
+          if (categorie === 'Prêt pour mise en place') {
+              countReadyMiseEnPlace++;
+              planningEventsList.push({ date: "N/A", tech, client: clientName, type: "Prêt pour Mise en Place", duration: 0, status: "A Planifier (Migr)", color: "ready_migr" });
+              return;
+          }
+          if (categorie === 'Prêt pour analyse' || categorie === 'A Planifier (Analyse)') {
+              countReadyAnalyse++;
+              planningEventsList.push({ date: "N/A", tech, client: clientName, type: "Prêt pour Analyse", duration: 0, status: "A Planifier (Analyse)", color: "ready_analyse" });
+          }
 
-        const remainingLoad = getRemainingLoad(categorie, motif);
-        if (remainingLoad <= 0) return; 
+          const remainingLoad = getRemainingLoad(categorie, motif);
+          if (remainingLoad <= 0) return; 
 
-        let targetDate = null;
-        let status = "";
-        let color = "";
+          let targetDate = null;
+          let status = "";
+          let color = "";
 
-        if (reportDate) {
-            targetDate = reportDate;
-            status = "Reporté";
-            color = "reporte";
-        } else {
-            const techSlots = techBackofficeSchedule[tech] || [];
-            const targetSlotTime = techSlots.find(t => t >= todayTime);
-            if (targetSlotTime) {
-                targetDate = new Date(targetSlotTime);
-                status = "Auto (Prochain BO)";
-                color = "encours";
-            } else {
-                targetDate = new Date(today);
-                targetDate.setDate(today.getDate() + 7);
-                status = "En attente (Pas de BO dispo)";
-                color = "attente";
-            }
-        }
+          if (reportDate) {
+              targetDate = reportDate;
+              status = "Reporté";
+              color = "reporte";
+          } else {
+              const techSlots = techBackofficeSchedule[tech] || [];
+              const targetSlotTime = techSlots.find(t => t >= todayTime);
+              if (targetSlotTime) {
+                  targetDate = new Date(targetSlotTime);
+                  status = "Auto (Prochain BO)";
+                  color = "encours";
+              } else {
+                  targetDate = new Date(today);
+                  targetDate.setDate(today.getDate() + 7);
+                  status = "En attente (Pas de BO dispo)";
+                  color = "attente";
+              }
+          }
 
-        if (targetDate) { 
-            const targetDateStr = toLocalDateString(targetDate);
-            const targetMonth = targetDateStr.substring(0, 7);
-            addToStats(targetMonth, tech, 0, remainingLoad, 0);
+          if (targetDate) { 
+              const targetDateStr = toLocalDateString(targetDate);
+              const targetMonth = targetDateStr.substring(0, 7);
+              addToStats(targetMonth, tech, 0, remainingLoad, 0);
 
-            let displayType = `Encours (${categorie || "Non classé"})`;
-            if (!categorie && remainingLoad === 0.5) displayType = "Prépa. Avocatmail (Auto)";
+              let displayType = `Encours (${categorie || "Non classé"})`;
+              if (categorie === "" && remainingLoad === 0.5) displayType = "Prépa. Avocatmail (Auto)";
 
-            finalEventsList.push({
-                date: targetDateStr, tech, client: clientName, type: displayType, duration: remainingLoad,
-                status: status, color: color, raw_besoin: 0, raw_capacite: 0, raw_besoin_encours: remainingLoad
-            });
-        }
-    });
+              finalEventsList.push({
+                  date: targetDateStr, tech, client: clientName, type: displayType, duration: remainingLoad,
+                  status: status, color: color, raw_besoin: 0, raw_capacite: 0, raw_besoin_encours: remainingLoad
+              });
+          }
+      });
+    }
 
     const detailedDataArray = Array.from(monthlyStats.values()).sort((a, b) => a.month.localeCompare(b.month));
     const sortedMonths = Array.from(monthsSet).sort().reverse(); 
@@ -606,15 +501,13 @@ function MigrationDashboard() {
     return { detailedData: detailedDataArray, eventsData: [...planningEventsList, ...finalEventsList], planningCount: countReadyMiseEnPlace, analysisPipeCount: countReadyAnalyse, availableMonths: sortedMonths };
   }, [backofficeData, encoursData, techList]);
 
-  // (Le reste du code reste identique...)
-  // ... je conserve les hooks et le render
-  
-  // --- LOGIQUE TRI & AFFICHAGE (Identique) ---
+  // --- RENDU CHART & TABLEAUX ---
   const handleSort = (key) => {
     let direction = 'asc';
     if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
     setSortConfig({ key, direction });
   };
+  
   const filteredAndSortedEvents = useMemo(() => {
     let events = eventsData;
     if (selectedTech !== 'Tous') events = events.filter(e => e.tech === selectedTech);
@@ -626,8 +519,8 @@ function MigrationDashboard() {
         let valA = a[sortConfig.key];
         let valB = b[sortConfig.key];
         if (sortConfig.key === 'date') { if (valA === 'N/A') valA = '0000-00-00'; if (valB === 'N/A') valB = '0000-00-00'; }
-        if (typeof valA === 'string') valA = valA.toLowerCase();
-        if (typeof valB === 'string') valB = valB.toLowerCase();
+        valA = safeString(valA).toLowerCase();
+        valB = safeString(valB).toLowerCase();
         if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
         if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
         return 0;
@@ -722,6 +615,19 @@ function MigrationDashboard() {
       else { if (!selectedMonth) { const current = getCurrentMonthKey(); setSelectedMonth(availableMonths.includes(current) ? current : availableMonths[0]); } }
   };
 
+  const getStatusBadgeColor = (colorCode) => {
+      switch(colorCode) {
+          case 'need': return `bg-blue-50 ${COLORS.text_besoin} border border-blue-100`;
+          case 'encours': return `bg-orange-50 ${COLORS.text_encours} border border-orange-100`;
+          case 'capacity': return `bg-emerald-50 ${COLORS.text_capacite} border border-emerald-100`;
+          case 'ready_migr': return 'bg-indigo-50 text-indigo-600 border border-indigo-100';
+          case 'ready_analyse': return 'bg-cyan-50 text-cyan-600 border border-cyan-100';
+          case 'reporte': return `bg-red-50 ${COLORS.text_danger} border border-red-100`;
+          case 'attente': return `bg-slate-50 ${COLORS.text_neutral} border border-slate-200`;
+          default: return `bg-slate-50 ${COLORS.text_neutral}`;
+      }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500 relative">
       <header className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
@@ -730,7 +636,7 @@ function MigrationDashboard() {
           <div><h1 className="text-lg font-bold text-slate-800 leading-tight">Pilotage Migrations</h1><p className="text-xs text-slate-500 flex items-center gap-2">{selectedTech === 'Tous' ? "Vue Équipe" : `Focus: ${selectedTech}`}</p></div>
         </div>
         <div className="flex gap-2 items-center">
-            <button onClick={() => setIsRulesModalOpen(true)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Voir les règles de calcul"><Info size={20} /></button>
+            <button onClick={() => setIsRulesModalOpen(true)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Règles de calcul"><Info size={20} /></button>
             <UserButton />
             <div className="relative">
                 <Filter className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
@@ -899,7 +805,7 @@ function MigrationDashboard() {
                 </div>
             </div>
             <div className="flex-1 overflow-auto p-4 font-mono text-xs bg-slate-950">
-                {debugTab === 'raw' ? (<div className="text-green-400">{debugData ? (<pre>{JSON.stringify(debugData, null, 2)}</pre>) : (<div className="flex items-center gap-2 text-slate-500"><Activity size={14} className="animate-spin" /> Chargement des données...</div>)}</div>) : (<div className="text-blue-200">{auditData ? (Object.keys(auditData).length > 0 ? (Object.entries(auditData).map(([week, events]) => (<div key={week} className="mb-4 border-b border-slate-800 pb-2"><h3 className="font-bold text-yellow-400 mb-1">Semaine {week} <span className="text-slate-500 font-normal">({events.length} événements)</span></h3><table className="w-full text-left text-[10px]"><thead><tr className="text-slate-500 border-b border-slate-800"><th className="pb-1">Date</th><th className="pb-1">Client</th><th className="pb-1">Technicien</th><th className="pb-1 text-right">Valeur (h)</th></tr></thead><tbody>{events.map((ev, i) => (<tr key={i} className="hover:bg-slate-900"><td className="py-0.5 text-slate-300">{ev.date}</td><td className="py-0.5 text-blue-300 truncate max-w-[200px]">{ev.client}</td><td className="py-0.5 text-slate-400">{ev.tech}</td><td className="py-0.5 text-right font-bold text-white">{ev.raw_besoin.toFixed(2)}</td></tr>))}<tr className="bg-slate-900 font-bold"><td colSpan="3" className="text-right py-1 text-slate-400">TOTAL SEMAINE :</td><td className="text-right py-1 text-green-400">{events.reduce((sum, e) => sum + e.raw_besoin, 0).toFixed(2)} h</td></tr></tbody></table></div>))) : (<div className="text-slate-500 italic p-4">Aucun événement "Besoin (Nouv)" trouvé pour ce mois.</div>)) : (<div className="flex flex-col items-center justify-center h-full text-slate-500 gap-2"><Calculator size={24} /><p>Sélectionnez un mois sur le graphique pour voir le détail hebdomadaire.</p></div>)}</div>)}
+                {debugTab === 'raw' ? (<div className="text-green-400">{debugData ? (<pre>{JSON.stringify(debugData, null, 2)}</pre>) : (<div className="flex items-center gap-2 text-slate-500"><Activity size={14} className="animate-spin" /> Chargement des données...</div>)}</div>) : (<div className="text-blue-200">Log console</div>)}
             </div>
         </div>
       </div>
