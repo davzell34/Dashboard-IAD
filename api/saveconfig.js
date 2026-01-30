@@ -197,6 +197,7 @@ const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeight
             onUpdateWeights(tempWeights); // Optimiste
             setIsEditing(false);
 
+            // Note: le ?t= est inutile en POST, mais utile en GET
             const response = await fetch('/api/saveConfig', { 
                 method: 'POST', 
                 headers: { 'Content-Type': 'application/json' },
@@ -204,7 +205,7 @@ const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeight
             });
     
             if (response.ok) {
-                alert("✅ Config sauvegardée !");
+                alert("✅ Config sauvegardée ! (Faites F5 pour vérifier)");
             } else {
                 console.warn("Erreur sauvegarde backend.");
                 alert("Erreur de sauvegarde (Vérifiez Console).");
@@ -381,40 +382,57 @@ function MigrationDashboard() {
 
   const { getToken } = useAuth(); 
 
+  // --- LE USE EFFECT BLINDÉ (DEBUG & CHARGEMENT) ---
   useEffect(() => {
     const fetchData = async () => {
+      console.log("📍 ÉTAPE 1 : Démarrage du chargement des données...");
       setIsLoading(true);
+      
       try {
         const token = await getToken();
+        console.log("📍 ÉTAPE 2 : Token récupéré.");
+        
         const headers = { Authorization: `Bearer ${token}` };
 
-        // 1. DATA
-        const response = await fetch('/api/getData', { headers });
-        const json = await response.json();
-        setDebugData(json);
-
-        // 2. CONFIG (AVEC ANTI-CACHE)
+        // --- TEST CHARGEMENT CONFIG ---
+        console.log("📍 ÉTAPE 3 : Tentative appel /api/getConfig...");
         try {
-            // L'ajout du timestamp force le navigateur à redemander la config
+            // !IMPORTANT : ?t=... force le navigateur à ne pas utiliser le cache !
             const configRes = await fetch(`/api/getConfig?t=${Date.now()}`);
+            console.log(`📍 ÉTAPE 4 : Réponse reçue. Statut HTTP: ${configRes.status}`);
+
             if (configRes.ok) {
                 const configJson = await configRes.json();
-                console.log("🛠️ CONFIG REÇUE DU SERVEUR :", configJson);
+                console.log("✅ SUCCÈS - CONFIG REÇUE :", configJson);
                 
                 if (configJson && Object.keys(configJson).length > 0) {
                     setWeightsConfig(prev => ({ ...prev, ...configJson }));
                 }
+            } else {
+                const textError = await configRes.text();
+                console.error("❌ ERREUR API CONFIG (Pas 200 OK) :", configRes.status, textError);
             }
         } catch (e) {
-            console.warn("Config offline:", e);
+            console.error("❌ CRASH APPEL API CONFIG :", e);
         }
 
-        if (!response.ok) throw new Error(json.error || `Erreur API`);
+        // --- CHARGEMENT DONNÉES MÉTIERS ---
+        console.log("📍 ÉTAPE 5 : Appel /api/getData...");
+        const response = await fetch('/api/getData', { headers });
+        const json = await response.json();
+
+        setDebugData(json); // Pour le panneau de debug
+
+        if (!response.ok) throw new Error(json.error || `Erreur API getData`);
+        
         if (json.backoffice) setBackofficeData(json.backoffice || []); 
         if (json.encours) setEncoursData(json.encours || []);
+        
+        console.log("📍 ÉTAPE 6 : Tout est chargé !");
         setIsLoading(false);
+
       } catch (err) {
-        console.error("❌ Erreur API :", err);
+        console.error("❌ ERREUR GLOBALE :", err);
         setDebugData({ error: err.message });
         setIsLoading(false);
       }
@@ -430,7 +448,6 @@ function MigrationDashboard() {
     const allowedNeedEvents = ['Avocatmail - Analyse', 'Migration messagerie Adwin', 'Migration messagerie Adwin - analyse'];
     let allEvents = [];
 
-    // TRAITEMENT BACKOFFICE
     if(Array.isArray(backofficeData)) {
       backofficeData.forEach(row => {
           const cleanRow = {};
