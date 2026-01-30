@@ -158,10 +158,19 @@ const getOverlapHours = (range1, range2) => {
     return (end - start) / (1000 * 60 * 60); 
 };
 
-// --- NOUVELLE LOGIQUE DE PONDÉRATION (FIXE) ---
-const getRemainingLoad = (categorie) => {
-    if (!categorie) return 0.5; 
+// --- NOUVELLE LOGIQUE DE PONDÉRATION AVEC EXCEPTION MOTIF ---
+const getRemainingLoad = (categorie, motif) => {
+    // 1. GESTION DES TICKETS SANS CATÉGORIE
+    if (!categorie || typeof categorie !== 'string' || categorie.trim() === '') {
+        const cleanMotif = (motif || "").trim();
+        // Exception stricte sur le motif
+        if (cleanMotif.startsWith("[IAD] - Préparation Avocatmail")) {
+            return 0.50; // Considéré comme "Autre"
+        }
+        return 0; // Sinon, on ignore le ticket
+    }
 
+    // 2. GESTION DES CATÉGORIES EXISTANTES
     const cat = categorie.trim().toLowerCase();
 
     // 1.00 h
@@ -179,7 +188,7 @@ const getRemainingLoad = (categorie) => {
         return 0.15;
     }
 
-    // 0.05 h (Attente / Bloqué) - Valeur très faible pour ne pas charger le graph
+    // 0.05 h (Attente / Bloqué)
     if (cat.includes('attente') || cat.includes('bloqué')) {
         return 0.05;
     }
@@ -195,7 +204,6 @@ const getRemainingLoad = (categorie) => {
 
 // --- COMPOSANTS UI ---
 
-// NOUVEAU COMPOSANT : MODAL DES RÈGLES
 const RulesModal = ({ isOpen, onClose }) => {
     if (!isOpen) return null;
     return (
@@ -221,7 +229,7 @@ const RulesModal = ({ isOpen, onClose }) => {
                         <ul className="list-disc pl-4 space-y-1 text-slate-600">
                             <li><span className="font-semibold text-slate-800">Source :</span> Calendrier (Snowflake).</li>
                             <li><span className="font-semibold text-slate-800">Calcul :</span> Durée réelle saisie, sinon formule auto : <br/><code className="bg-slate-100 px-1 rounded">1h + (Nb Users - 5) × 10min</code>.</li>
-                            <li><span className="font-semibold text-slate-800">Règle d'Absorption :</span> Si l'événement tombe <i>pendant</i> un créneau Backoffice, il compte à <b>0h</b> (car inclus dans la capacité).</li>
+                            <li><span className="font-semibold text-slate-800">Règle d'Absorption :</span> Si l'événement tombe <i>pendant</i> un créneau Backoffice, il compte à <b>0h</b>.</li>
                         </ul>
                     </div>
 
@@ -233,6 +241,7 @@ const RulesModal = ({ isOpen, onClose }) => {
                         <ul className="list-disc pl-4 space-y-1 text-slate-600">
                             <li><span className="font-semibold text-slate-800">Source :</span> Outil de Ticketing.</li>
                             <li><span className="font-semibold text-slate-800">Déduplication :</span> Si le client est déjà dans le planning (Bleu), le ticket vaut <b>0h</b>.</li>
+                            <li><span className="font-semibold text-slate-800">Tickets Sans Catégorie :</span> Ignorés (0h), <span className="text-red-600 font-bold">SAUF</span> si le Motif commence par <i>"[IAD] - Préparation Avocatmail"</i> (compte 0.50h).</li>
                             <li>
                                 <span className="font-semibold text-slate-800">Pondération (Charge) :</span>
                                 <ul className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1 ml-2">
@@ -250,12 +259,12 @@ const RulesModal = ({ isOpen, onClose }) => {
                     {/* SECTION VERTE */}
                     <div className="space-y-2">
                         <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_capacite} flex items-center gap-2 border-b border-emerald-100 pb-1`}>
-                            <span className={`w-2 h-2 rounded-full ${COLORS.bg_capacite}`}></span> 3. Capacité & Règles Spéciales
+                            <span className={`w-2 h-2 rounded-full ${COLORS.bg_capacite}`}></span> 3. Capacité
                         </h4>
                         <ul className="list-disc pl-4 space-y-1 text-slate-600">
                             <li><span className="font-semibold text-slate-800">Source :</span> Événements "Backoffice".</li>
                             <li><span className="font-semibold text-slate-800">Calcul Net :</span> Durée totale - (Rendez-vous clients superposés).</li>
-                            <li><span className="font-semibold text-red-600">Règle "Reporté le" :</span> Si une date de report existe, le ticket est <b>forcé</b> à cette date (le placement automatique est désactivé).</li>
+                            <li><span className="font-semibold text-red-600">Règle "Reporté le" :</span> Force le ticket à cette date.</li>
                         </ul>
                     </div>
 
@@ -591,6 +600,7 @@ function MigrationDashboard() {
         Object.keys(row).forEach(k => cleanRow[k.trim()] = row[k]);
         const techNameRaw = cleanRow['RESPONSABLE'];
         const categorie = cleanRow['CATEGORIE'];
+        const motif = cleanRow['MOTIF']; // RECUPERATION DU MOTIF
         const reportDateStr = cleanRow['REPORTE_LE'];
         const clientName = cleanRow['INTERLOCUTEUR'] || 'Client Inconnu';
         const tech = normalizeTechName(techNameRaw, techList);
@@ -620,8 +630,8 @@ function MigrationDashboard() {
         }
 
         // --- NOUVELLE FONCTION DE CALCUL CHARGE ---
-        const remainingLoad = getRemainingLoad(categorie);
-        if (remainingLoad <= 0) return; // Si 0.00h (ex: Suspendu), on ne l'affiche pas dans le graph
+        const remainingLoad = getRemainingLoad(categorie, motif);
+        if (remainingLoad <= 0) return; // Si 0.00h (ex: Suspendu ou sans catégorie non matché), on ne l'affiche pas
 
         const reportDate = parseDateSafe(reportDateStr);
         let targetDate = null;
@@ -655,11 +665,17 @@ function MigrationDashboard() {
 
             addToStats(targetMonth, tech, 0, remainingLoad, 0);
 
+            // GESTION DU TYPE POUR L'AFFICHAGE SI CATEGORIE VIDE
+            let displayType = `Encours (${categorie || "Non classé"})`;
+            if (!categorie && remainingLoad === 0.5) {
+                displayType = "Prépa. Avocatmail (Auto)";
+            }
+
             finalEventsList.push({
                 date: targetDateStr,
                 tech,
                 client: clientName,
-                type: `Encours (${categorie || "Non classé"})`,
+                type: displayType,
                 duration: remainingLoad,
                 status: status,
                 color: color,
