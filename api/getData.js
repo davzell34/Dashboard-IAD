@@ -1,5 +1,5 @@
 import { verifyToken } from '@clerk/backend';
-const snowflake = require('snowflake-sdk');
+const { createSnowflakeConnection } = require('./_snowflake');
 
 export default async function handler(request, response) {
   
@@ -21,14 +21,7 @@ export default async function handler(request, response) {
   }
 
   // 2. CONNEXION
-  const connection = snowflake.createConnection({
-    account: process.env.SNOWFLAKE_ACCOUNT,
-    username: process.env.SNOWFLAKE_USERNAME,
-    password: process.env.SNOWFLAKE_PASSWORD,
-    database: process.env.SNOWFLAKE_DB,
-    schema: process.env.SNOWFLAKE_SCHEMA,
-    warehouse: process.env.SNOWFLAKE_WAREHOUSE
-  });
+  const connection = createSnowflakeConnection();
 
   const runQuery = (conn, sql) => {
     return new Promise((resolve, reject) => {
