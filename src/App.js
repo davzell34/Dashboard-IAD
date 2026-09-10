@@ -409,11 +409,15 @@ const MigrationTimelineMini = ({ currentIndex, alea, casParticulier, compact }) 
                             <div className="flex flex-col items-center gap-1 shrink-0" title={stage.tooltip}>
                                 <div className={`${circleSize} rounded-full flex items-center justify-center transition-colors cursor-help ${
                                     isCurrent ? (alea ? 'bg-amber-100 ring-4 ring-amber-50' : 'bg-blue-600 ring-4 ring-blue-100') :
-                                    isDone ? 'bg-blue-100' : 'bg-slate-100'
+                                    isDone ? 'bg-blue-500' : 'bg-white border-2 border-dashed border-slate-200'
                                 }`}>
-                                    <StageIcon size={iconSize} className={isCurrent ? (alea ? 'text-amber-700' : 'text-white') : isDone ? 'text-blue-500' : 'text-slate-400'} />
+                                    {isDone ? (
+                                        <CheckCircle2 size={iconSize} className="text-white" />
+                                    ) : (
+                                        <StageIcon size={iconSize} className={isCurrent ? (alea ? 'text-amber-700' : 'text-white') : 'text-slate-300'} />
+                                    )}
                                 </div>
-                                {!compact && <span className={`text-[10px] font-medium whitespace-nowrap ${isCurrent ? 'text-slate-800' : isDone ? 'text-slate-400' : 'text-slate-300'}`}>{stage.label}</span>}
+                                {!compact && <span className={`text-[10px] font-medium whitespace-nowrap ${isCurrent ? 'text-slate-800' : isDone ? 'text-blue-500' : 'text-slate-300'}`}>{stage.label}</span>}
                             </div>
                             {i < MIGRATION_STAGES.length - 1 && (
                                 <div className="flex-1 mx-1 rounded-full" style={{ height: '2px', minWidth: '12px', marginTop: topOffset, backgroundColor: stepNum < currentIndex ? '#93C5FD' : '#EAECF0' }} />
@@ -426,7 +430,7 @@ const MigrationTimelineMini = ({ currentIndex, alea, casParticulier, compact }) 
                 {casParticulier && (
                     <>
                         <div className="flex-1 mx-1" style={{ marginTop: topOffset, borderTop: '2px dashed #F87171' }} />
-                        <div className="flex flex-col items-center gap-1 shrink-0" title={`Cas particulier : ${casParticulier.label}${casParticulier.date ? ' — ' + casParticulier.date.toLocaleDateString('fr-FR') : ''}`}>
+                        <div className="flex flex-col items-center gap-1 shrink-0" title={`Cas particulier : ${casParticulier.label}${casParticulier.assignee ? ' — attribué à ' + casParticulier.assignee : ''}${casParticulier.date ? ' — ' + casParticulier.date.toLocaleDateString('fr-FR') : ''}`}>
                             <div className={`${circleSize} rounded-full flex items-center justify-center bg-red-100 ring-4 ring-red-50 cursor-help`}>
                                 <CasIcon size={iconSize} className="text-red-600" />
                             </div>
@@ -473,13 +477,15 @@ const MigrationRow = ({ migration, isExpanded, onToggle }) => {
             </button>
             {isExpanded && (
                 <div className="px-4 pb-4 pt-2 bg-slate-50/60 animate-in fade-in duration-150">
-                    <MigrationTimelineMini currentIndex={migration.stageIndex} alea={migration.alea} casParticulier={migration.casParticulier} />
+                    <div onClick={onToggle} className="cursor-pointer">
+                        <MigrationTimelineMini currentIndex={migration.stageIndex} alea={migration.alea} casParticulier={migration.casParticulier} />
+                    </div>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 pt-3 border-t border-slate-200 text-[11px] text-slate-500">
                         {migration.analysisDate && <span>Analyse : {formatDate(migration.analysisDate)}</span>}
                         {migration.livraisonDate && <span>Planifié : {formatDate(migration.livraisonDate)}</span>}
                         {migration.casParticulier && (
                             <span className="text-red-600 font-medium">
-                                {migration.casParticulier.label}{migration.casParticulier.date ? ` (${formatDate(migration.casParticulier.date)})` : ''}
+                                {migration.casParticulier.label}{migration.casParticulier.assignee ? ` — ${migration.casParticulier.assignee}` : ''}{migration.casParticulier.date ? ` (${formatDate(migration.casParticulier.date)})` : ''}
                             </span>
                         )}
                     </div>
@@ -1505,7 +1511,7 @@ function MigrationDashboard() {
           .forEach(e => {
             const d = parseDateSafe(e.DATE);
             if (d && d > afterDate && (!maxFormationDate || d <= maxFormationDate)) {
-              candidates.push({ label: safeString(e.EVENEMENT), date: d, kind: 'formation' });
+              candidates.push({ label: safeString(e.EVENEMENT), date: d, kind: 'formation', assignee: safeString(e.RESPONSABLE) });
             }
           });
       }
@@ -1518,7 +1524,7 @@ function MigrationDashboard() {
           .forEach(e => {
             const d = parseDateSafe(e.DATE);
             if (d && d > afterDate) {
-              candidates.push({ label: safeString(e.EVENEMENT), date: d, kind: 'materiel' });
+              candidates.push({ label: safeString(e.EVENEMENT), date: d, kind: 'materiel', assignee: safeString(e.RESPONSABLE) });
             }
           });
       }
