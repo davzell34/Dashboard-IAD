@@ -482,6 +482,13 @@ const MigrationRow = ({ migration, isExpanded, onToggle }) => {
                                 {migration.linkedTicket.dureeMinutes > 0 && <span>Durée : {(migration.linkedTicket.dureeMinutes / 60).toFixed(1)} h</span>}
                                 {migration.linkedTicket.nbRappelsClient > 0 && <span>Rappels client : {migration.linkedTicket.nbRappelsClient}</span>}
                             </div>
+                            {migration.linkedTicket.notes && (
+                                <div className="mt-2 pt-2 border-t border-slate-100 space-y-1.5 max-h-48 overflow-y-auto">
+                                    {migration.linkedTicket.notes.split('\n---\n').filter(Boolean).map((note, i) => (
+                                        <p key={i} className="text-[11px] text-slate-600 bg-white border border-slate-200 rounded-md px-2 py-1.5 whitespace-pre-wrap">{note.trim()}</p>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     ) : (
                         <p className="mt-3 pt-3 border-t border-slate-200 text-[11px] text-slate-400 italic">Aucun ticket "[IAD] - Préparation Avocatmail" trouvé pour ce dossier.</p>
@@ -704,6 +711,7 @@ function MigrationDashboard() {
   const [backofficeData, setBackofficeData] = useState([]);
   const [encoursData, setEncoursData] = useState([]);
   const [specialEventsData, setSpecialEventsData] = useState([]);
+  const [ticketNotesData, setTicketNotesData] = useState([]);
   const [techList, setTechList] = useState(TECH_LIST_DEFAULT);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTech, setSelectedTech] = useState('Tous');
@@ -753,6 +761,7 @@ function MigrationDashboard() {
         setBackofficeData(cached.backoffice || []);
         setEncoursData(cached.encours || []);
         setSpecialEventsData(cached.specialEvents || []);
+        setTicketNotesData(cached.ticketNotes || []);
         setLastSyncTime(new Date(cached.cachedAt));
         console.log("📍 Données métier chargées depuis le cache local.");
         return;
@@ -774,9 +783,10 @@ function MigrationDashboard() {
       if (json.backoffice) setBackofficeData(json.backoffice || []);
       if (json.encours) setEncoursData(json.encours || []);
       if (json.specialEvents) setSpecialEventsData(json.specialEvents || []);
+      if (json.ticketNotes) setTicketNotesData(json.ticketNotes || []);
 
       const cachedAt = Date.now();
-      writeCache(cacheKey, { backoffice: json.backoffice, encours: json.encours, specialEvents: json.specialEvents, cachedAt }, DATA_CACHE_TTL_MS);
+      writeCache(cacheKey, { backoffice: json.backoffice, encours: json.encours, specialEvents: json.specialEvents, ticketNotes: json.ticketNotes, cachedAt }, DATA_CACHE_TTL_MS);
 
       setLastSyncTime(new Date(cachedAt));
       console.log("📍 Données métier chargées !");
@@ -1495,6 +1505,7 @@ function MigrationDashboard() {
       // préparation, distincte de la ligne utilisée pour l'étape courante).
       const dossierTickets = allTicketsByDossier.get(dossier.numDossier) || [];
       const linkedTicketRaw = dossierTickets.find(t => safeString(t.MOTIF).startsWith('[IAD] - Préparation Avocatmail'));
+      const notesRow = linkedTicketRaw ? (ticketNotesData || []).find(n => String(n.TICKET_ID) === String(linkedTicketRaw.NUMERO_INCIDENT)) : null;
       const linkedTicket = linkedTicketRaw ? {
         motif: safeString(linkedTicketRaw.MOTIF),
         categorie: safeString(linkedTicketRaw.CATEGORIE),
@@ -1504,7 +1515,8 @@ function MigrationDashboard() {
         derniereAction: parseDateSafe(linkedTicketRaw.DERNIERE_ACTION),
         reporteLe: parseDateSafe(linkedTicketRaw.REPORTE_LE),
         dureeMinutes: Number(linkedTicketRaw.DUREE_MINUTES) || 0,
-        nbRappelsClient: Number(linkedTicketRaw.NB_RAPPELS_CLIENT) || 0
+        nbRappelsClient: Number(linkedTicketRaw.NB_RAPPELS_CLIENT) || 0,
+        notes: notesRow ? safeString(notesRow.NOTES_CLEAN) : ''
       } : null;
 
       return {
@@ -1518,7 +1530,7 @@ function MigrationDashboard() {
         linkedTicket
       };
     }).sort((a, b) => (a.stageIndex || 0) - (b.stageIndex || 0));
-  }, [encoursData, backofficeData, specialEventsData, effectiveTechName, techList]);
+  }, [encoursData, backofficeData, specialEventsData, ticketNotesData, effectiveTechName, techList]);
 
   // Filtre + tri par étape appliqués à l'affichage, indépendamment du calcul brut
   const displayedMigrations = useMemo(() => {
