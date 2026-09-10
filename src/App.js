@@ -577,7 +577,7 @@ const CustomTooltip = ({ active, payload, label }) => {
     const isPositive = dispo >= 0;
     return (
       <div className="bg-white p-3 border border-slate-200 shadow-xl rounded-lg text-xs min-w-[180px]">
-        <p className="font-bold text-slate-800 mb-2 border-b border-slate-100 pb-1">{String(label).startsWith('S') ? label : formatMonth(data.month)}</p>
+        <p className="font-bold text-slate-800 mb-2 border-b border-slate-100 pb-1">{data.weekSort !== undefined ? data.label : formatMonth(data.month)}</p>
         <div className="space-y-1">
             <div className={`flex justify-between items-center ${COLORS.text_besoin}`}><span>Besoin (Nouv) :</span><span className="font-bold">{data.besoin?.toFixed(1)} h</span></div>
             <div className={`flex justify-between items-center ${COLORS.text_encours}`}><span>Besoin (En cours) :</span><span className="font-bold">{data.besoin_encours?.toFixed(1)} h</span></div>
@@ -1200,7 +1200,7 @@ function MigrationDashboard() {
           const weekRange = getWeekRange(evt.date);
           const label = `${weekNum} (${weekRange})`;
           if (!weekMap.has(key)) {
-              weekMap.set(key, { month: key, label, year: d.getFullYear(), weekSort: parseInt(weekNum.replace('S', '')), besoin: 0, besoin_encours: 0, capacite: 0, weekEnd: getWeekEndDate(evt.date) });
+              weekMap.set(key, { month: key, label, shortLabel: weekNum, year: d.getFullYear(), weekSort: parseInt(weekNum.replace('S', '')), besoin: 0, besoin_encours: 0, capacite: 0, weekEnd: getWeekEndDate(evt.date) });
           }
           const entry = weekMap.get(key);
           entry.besoin += (evt.raw_besoin || 0);
@@ -1546,7 +1546,18 @@ function MigrationDashboard() {
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={mainChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }} onClick={handleChartClick}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey={chartMode === 'months' ? "month" : "label"} axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} dy={5} tickFormatter={(val) => { if (String(val).startsWith('S') || /^\d{4}-S\d+/.test(String(val))) return val; return formatMonthShort(val); }} interval={0} />
+              <XAxis 
+                dataKey={chartMode === 'months' ? "month" : chartMode === 'weeks-all' ? "shortLabel" : "label"} 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{fill: '#64748b', fontSize: 10}} 
+                dy={chartMode === 'weeks-all' ? 0 : 5}
+                angle={chartMode === 'weeks-all' ? -45 : 0}
+                textAnchor={chartMode === 'weeks-all' ? 'end' : 'middle'}
+                height={chartMode === 'weeks-all' ? 45 : 30}
+                tickFormatter={(val) => { if (String(val).startsWith('S')) return val; return formatMonthShort(val); }} 
+                interval={0} 
+              />
               <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} />
               <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(0,0,0,0.05)' }} />
               <Bar stackId="a" dataKey="besoin" fill={COLORS.besoin} radius={[0, 0, 0, 0]} barSize={chartMode === 'weeks-month' ? 30 : chartMode === 'weeks-all' ? 12 : 16}>
