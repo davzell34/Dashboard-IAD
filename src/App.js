@@ -151,6 +151,21 @@ const getCurrentMonthKey = () => {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
 
+// Retourne le dimanche (fin de semaine) d'une date donnée, pour savoir si une
+// semaine est déjà entièrement passée par rapport à aujourd'hui.
+const getWeekEndDate = (dateStr) => {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return null;
+    const day = date.getDay();
+    const diffToMonday = date.getDate() - day + (day === 0 ? -6 : 1);
+    const monday = new Date(date);
+    monday.setDate(diffToMonday);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    sunday.setHours(23, 59, 59, 999);
+    return sunday;
+};
+
 const parseDateSafe = (dateStr) => {
     if (!dateStr) return null;
     let cleanStr = String(dateStr);
@@ -1101,6 +1116,25 @@ function MigrationDashboard() {
       entry.besoin_encours += item.besoin_encours;
       entry.capacite += item.capacite;
     });
+
+    // Le mois en cours mélange des semaines déjà passées (capacité perdue,
+    // qu'elle ait servi ou non) et des semaines à venir : le total mensuel
+    // brut donne une fausse impression de marge. On le remplace par le
+    // total des seules semaines restantes à partir d'aujourd'hui.
+    const currentMonthKey = getCurrentMonthKey();
+    const todayISO = toLocalDateString(new Date());
+    if (aggMap.has(currentMonthKey)) {
+        let relevantEvents = eventsData.filter(e => e.date !== "N/A" && e.date.startsWith(currentMonthKey) && e.date >= todayISO);
+        if (selectedTech !== 'Tous') relevantEvents = relevantEvents.filter(e => e.tech === selectedTech);
+        const remaining = { besoin: 0, besoin_encours: 0, capacite: 0 };
+        relevantEvents.forEach(evt => {
+            remaining.besoin += (evt.raw_besoin || 0);
+            remaining.besoin_encours += (evt.raw_besoin_encours || 0);
+            remaining.capacite += (evt.raw_capacite || 0);
+        });
+        aggMap.set(currentMonthKey, { ...aggMap.get(currentMonthKey), ...remaining, isCurrentMonthPartial: true });
+    }
+
     const allMonthsKeys = Array.from(aggMap.keys()).sort();
     if(allMonthsKeys.length === 0) return [];
     const [startYear, startMonth] = allMonthsKeys[0].split('-').map(Number);
@@ -1117,7 +1151,7 @@ function MigrationDashboard() {
         if (currentM > 12) { currentM = 1; currentY++; }
     }
     return result;
-  }, [detailedData, selectedTech]);
+  }, [detailedData, eventsData, selectedTech]);
 
   const weeklyAggregatedData = useMemo(() => {
       if (!selectedMonth) return [];
@@ -1129,14 +1163,17 @@ function MigrationDashboard() {
           const weekRange = getWeekRange(evt.date); 
           const label = `${weekNum} (${weekRange})`; 
           if (!weekMap.has(weekNum)) {
-              weekMap.set(weekNum, { month: weekNum, label: label, weekSort: parseInt(weekNum.replace('S', '')), besoin: 0, besoin_encours: 0, capacite: 0 });
+              weekMap.set(weekNum, { month: weekNum, label: label, weekSort: parseInt(weekNum.replace('S', '')), besoin: 0, besoin_encours: 0, capacite: 0, weekEnd: getWeekEndDate(evt.date) });
           }
           const entry = weekMap.get(weekNum);
           entry.besoin += (evt.raw_besoin || 0);
           entry.besoin_encours += (evt.raw_besoin_encours || 0);
           entry.capacite += (evt.raw_capacite || 0);
       });
-      return Array.from(weekMap.values()).sort((a, b) => a.weekSort - b.weekSort);
+      const now = new Date();
+      return Array.from(weekMap.values())
+        .map(w => ({ ...w, isPast: w.weekEnd ? w.weekEnd < now : false }))
+        .sort((a, b) => a.weekSort - b.weekSort);
   }, [eventsData, selectedMonth, selectedTech]);
 
   const mainChartData = selectedMonth ? weeklyAggregatedData : monthlyAggregatedData;
@@ -1157,8 +1194,12 @@ function MigrationDashboard() {
 
   const kpiStats = useMemo(() => {
     if (mainChartData.length === 0) return { besoin: 0, capacite: 0, ratio: 0 };
-    const totalBesoin = mainChartData.reduce((acc, curr) => acc + (curr.totalBesoinMois || (curr.besoin + curr.besoin_encours)), 0);
-    const totalCapacite = mainChartData.reduce((acc, curr) => acc + curr.capacite, 0);
+    // On exclut les semaines déjà passées du total affiché en KPI : elles
+    // restent visibles (grisées) dans le graphique pour le contexte, mais ne
+    // comptent pas dans "ce qu'il reste à faire/disponible".
+    const relevantData = mainChartData.filter(curr => !curr.isPast);
+    const totalBesoin = relevantData.reduce((acc, curr) => acc + (curr.totalBesoinMois || (curr.besoin + curr.besoin_encours)), 0);
+    const totalCapacite = relevantData.reduce((acc, curr) => acc + curr.capacite, 0);
     const ratio = totalBesoin > 0 ? (totalCapacite / totalBesoin) * 100 : 0;
     return { besoin: totalBesoin, capacite: totalCapacite, ratio };
   }, [mainChartData]);
@@ -1455,14 +1496,26 @@ function MigrationDashboard() {
               <XAxis dataKey={selectedMonth ? "label" : "month"} axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} dy={5} tickFormatter={(val) => { if (String(val).startsWith('S')) return val; return formatMonthShort(val); }} interval={0} />
               <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} />
               <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(0,0,0,0.05)' }} />
-              <Bar stackId="a" dataKey="besoin" fill={COLORS.besoin} radius={[0, 0, 0, 0]} barSize={selectedMonth ? 30 : 16} />
-              <Bar stackId="a" dataKey="besoin_encours" fill={COLORS.encours} radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
-              <Bar stackId="b" dataKey="capacite" fill={COLORS.capacite} radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
+              <Bar stackId="a" dataKey="besoin" fill={COLORS.besoin} radius={[0, 0, 0, 0]} barSize={selectedMonth ? 30 : 16}>
+                {mainChartData.map((entry, i) => (<Cell key={i} fillOpacity={entry.isPast ? 0.3 : 1} />))}
+              </Bar>
+              <Bar stackId="a" dataKey="besoin_encours" fill={COLORS.encours} radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16}>
+                {mainChartData.map((entry, i) => (<Cell key={i} fillOpacity={entry.isPast ? 0.3 : 1} />))}
+              </Bar>
+              <Bar stackId="b" dataKey="capacite" fill={COLORS.capacite} radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16}>
+                {mainChartData.map((entry, i) => (<Cell key={i} fillOpacity={entry.isPast ? 0.3 : 1} />))}
+              </Bar>
             </ComposedChart>
           </ResponsiveContainer>
           )}
         </div>
         {!selectedMonth && <p className="text-[10px] text-center text-slate-400 italic mt-1">Cliquez sur un mois pour voir le détail par semaine</p>}
+        {!selectedMonth && monthlyAggregatedData.some(m => m.isCurrentMonthPartial) && (
+          <p className="text-[10px] text-center text-slate-400 italic">Mois en cours : seule la capacité/besoin restant à partir d'aujourd'hui est comptabilisé.</p>
+        )}
+        {selectedMonth && mainChartData.some(w => w.isPast) && (
+          <p className="text-[10px] text-center text-slate-400 italic mt-1">Semaines grisées : déjà passées, exclues des totaux ci-dessus.</p>
+        )}
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200/70 overflow-hidden mb-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
@@ -1612,7 +1665,10 @@ function MigrationDashboard() {
               <tbody className="divide-y divide-slate-100">
                 {monthlyAggregatedData.map((row) => (
                   <tr key={row.month} className={`hover:bg-slate-50 transition-colors ${selectedMonth === row.month ? 'bg-blue-50/50' : ''}`}>
-                    <td className="px-4 py-2 font-medium text-slate-800 capitalize">{row.label}</td>
+                    <td className="px-4 py-2 font-medium text-slate-800 capitalize">
+                        {row.label}
+                        {row.isCurrentMonthPartial && <span className="ml-1.5 text-[9px] font-bold uppercase text-blue-500 bg-blue-50 px-1 py-0.5 rounded align-middle">restant</span>}
+                    </td>
                     <td className="px-4 py-2 text-right">{row.totalBesoinMois.toFixed(1)} h</td>
                     <td className={`px-4 py-2 text-right ${COLORS.text_encours}`}>{row.besoin_encours > 0 ? `${row.besoin_encours.toFixed(1)} h` : '-'}</td>
                     <td className={`px-4 py-2 text-right ${COLORS.text_capacite} font-medium`}>{row.capacite.toFixed(1)} h</td>
