@@ -363,9 +363,9 @@ const TeamManagerPanel = ({ techList, newTechName, setNewTechName, onAdd, onRemo
 
 // --- FRISE COMPACTE (icônes + infobulles, mode normal ou compact, avec cas particulier optionnel) ---
 const MigrationTimelineMini = ({ currentIndex, alea, casParticulier, compact }) => {
-    const iconSize = compact ? 11 : 14;
-    const circleSize = compact ? 'w-5 h-5' : 'w-7 h-7';
-    const topOffset = compact ? '9px' : '13px';
+    const iconSize = compact ? 15 : 20;
+    const circleSize = compact ? 'w-7 h-7' : 'w-10 h-10';
+    const topOffset = compact ? '13px' : '19px';
     const CasIcon = casParticulier ? getCasParticulierIcon(casParticulier.kind) : null;
     return (
         <div className="flex items-start w-full">
@@ -393,12 +393,12 @@ const MigrationTimelineMini = ({ currentIndex, alea, casParticulier, compact }) 
             })}
             {casParticulier && (
                 <>
-                    <div className="flex-1 mx-1" style={{ marginTop: topOffset, borderTop: '2px dashed #CBD5E1' }} />
+                    <div className="flex-1 mx-1" style={{ marginTop: topOffset, borderTop: '2px dashed #F87171' }} />
                     <div className="flex flex-col items-center gap-1 shrink-0" title={`Cas particulier : ${casParticulier.label}${casParticulier.date ? ' — ' + casParticulier.date.toLocaleDateString('fr-FR') : ''}`}>
-                        <div className={`${circleSize} rounded-full flex items-center justify-center bg-purple-100 ring-4 ring-purple-50 cursor-help`}>
-                            <CasIcon size={iconSize} className="text-purple-600" />
+                        <div className={`${circleSize} rounded-full flex items-center justify-center bg-red-100 ring-4 ring-red-50 cursor-help`}>
+                            <CasIcon size={iconSize} className="text-red-600" />
                         </div>
-                        {!compact && <span className="text-[10px] font-medium whitespace-nowrap text-purple-600">{casParticulier.date ? casParticulier.date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : 'Cas part.'}</span>}
+                        {!compact && <span className="text-[10px] font-medium whitespace-nowrap text-red-600">{casParticulier.date ? casParticulier.date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : 'Cas part.'}</span>}
                     </div>
                 </>
             )}
@@ -436,7 +436,7 @@ const MigrationRow = ({ migration, isExpanded, onToggle }) => {
                         {migration.analysisDate && <span>Analyse : {formatDate(migration.analysisDate)}</span>}
                         {migration.livraisonDate && <span>Planifié : {formatDate(migration.livraisonDate)}</span>}
                         {migration.casParticulier && (
-                            <span className="text-purple-600 font-medium">
+                            <span className="text-red-600 font-medium">
                                 {migration.casParticulier.label}{migration.casParticulier.date ? ` (${formatDate(migration.casParticulier.date)})` : ''}
                             </span>
                         )}
@@ -662,6 +662,8 @@ function MigrationDashboard() {
   const currentTechName = normalizeTechName(user?.fullName, techList);
   const [viewAsTech, setViewAsTech] = useState(null);
   const [expandedDossier, setExpandedDossier] = useState(null);
+  const [migrationStageFilter, setMigrationStageFilter] = useState(null); // null = toutes les étapes
+  const [migrationSortDir, setMigrationSortDir] = useState('asc');
   const effectiveTechName = (isAdmin && viewAsTech) ? viewAsTech : currentTechName;
 
   const showToast = useCallback((message, type = 'success') => {
@@ -1319,6 +1321,13 @@ function MigrationDashboard() {
     }).sort((a, b) => (a.stageIndex || 0) - (b.stageIndex || 0));
   }, [encoursData, backofficeData, specialEventsData, effectiveTechName, techList]);
 
+  // Filtre + tri par étape appliqués à l'affichage, indépendamment du calcul brut
+  const displayedMigrations = useMemo(() => {
+    let list = migrationStageFilter ? myMigrations.filter(m => m.stageIndex === migrationStageFilter) : myMigrations;
+    list = [...list].sort((a, b) => migrationSortDir === 'asc' ? (a.stageIndex || 0) - (b.stageIndex || 0) : (b.stageIndex || 0) - (a.stageIndex || 0));
+    return list;
+  }, [myMigrations, migrationStageFilter, migrationSortDir]);
+
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500 relative">
       <header className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200/70 shadow-sm">
@@ -1708,13 +1717,43 @@ function MigrationDashboard() {
               </div>
             )}
           </div>
+          {myMigrations.length > 0 && (
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
+              <div className="relative">
+                <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400 pointer-events-none" />
+                <select
+                  value={migrationStageFilter || ''}
+                  onChange={(e) => setMigrationStageFilter(e.target.value ? Number(e.target.value) : null)}
+                  className="pl-7 pr-3 py-1.5 text-xs bg-white border border-slate-200 text-slate-700 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                >
+                  <option value="">Toutes les étapes</option>
+                  {MIGRATION_STAGES.map((s, i) => (<option key={s.key} value={i + 1}>{s.label}</option>))}
+                </select>
+              </div>
+              <button
+                onClick={() => setMigrationSortDir(d => d === 'asc' ? 'desc' : 'asc')}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs bg-white border border-slate-200 text-slate-600 rounded-md hover:bg-slate-50 transition-colors"
+                title="Inverser l'ordre de tri par étape"
+              >
+                {migrationSortDir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
+                Étape {migrationSortDir === 'asc' ? '1 → 5' : '5 → 1'}
+              </button>
+              {migrationStageFilter && (
+                <span className="text-[11px] text-slate-400">{displayedMigrations.length} dossier{displayedMigrations.length > 1 ? 's' : ''}</span>
+              )}
+            </div>
+          )}
           {myMigrations.length === 0 ? (
             <div className="bg-white p-8 rounded-xl border border-slate-200/80 text-center text-sm text-slate-400 italic">
               Aucun dossier actif trouvé pour le moment.
             </div>
+          ) : displayedMigrations.length === 0 ? (
+            <div className="bg-white p-8 rounded-xl border border-slate-200/80 text-center text-sm text-slate-400 italic">
+              Aucun dossier à cette étape.
+            </div>
           ) : (
             <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
-              {myMigrations.map(m => (
+              {displayedMigrations.map(m => (
                 <MigrationRow
                   key={m.numDossier}
                   migration={m}
