@@ -8,7 +8,7 @@ import {
   Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Loader,
   ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout, Search, Layers, Server, FileSearch, Terminal,
   Calculator, Database, BookOpen, Settings, Save, RotateCcw, Plus, Trash2, SlidersHorizontal, RefreshCw,
-  CheckCircle2, AlertCircle, Phone, Copy, Send, PauseCircle, GraduationCap, CalendarClock
+  CheckCircle2, AlertCircle, Phone, Copy, Send, PauseCircle, GraduationCap, CalendarClock, Wrench
 } from 'lucide-react';
 import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
 
@@ -210,13 +210,12 @@ const ALEA_INFO = {
 };
 
 // Icône du cas particulier affiché en pointillé après l'étape Livraison :
-// formation (ADAPPS) vs autre intervention déjà prévue. Basé sur le libellé
-// de l'événement faute d'un champ de type dédié dans la vue Snowflake.
-const getCasParticulierIcon = (label) => {
-    const l = safeString(label).toLowerCase();
-    if (l.includes('adapps') || l.includes('formation')) return GraduationCap;
-    return CalendarClock;
-};
+// formation ADAPPS vs intervention matériel sur site.
+const getCasParticulierIcon = (kind) => kind === 'formation' ? GraduationCap : Wrench;
+
+// Retire les accents pour un matching robuste sur les libellés d'événement
+// (ex. "matériel" vs "materiel" selon la saisie du technicien).
+const stripAccents = (s) => safeString(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
 // Traduit la catégorie (et le motif) d'un ticket en position sur la frise.
 // HYPOTHÈSE À VALIDER : les catégories "attente"/"bloqué"/"suspendu" ne
@@ -321,7 +320,7 @@ const MigrationTimelineMini = ({ currentIndex, alea, casParticulier, compact }) 
     const iconSize = compact ? 11 : 14;
     const circleSize = compact ? 'w-5 h-5' : 'w-7 h-7';
     const topOffset = compact ? '9px' : '13px';
-    const CasIcon = casParticulier ? getCasParticulierIcon(casParticulier.label) : null;
+    const CasIcon = casParticulier ? getCasParticulierIcon(casParticulier.kind) : null;
     return (
         <div className="flex items-start w-full">
             {MIGRATION_STAGES.map((stage, i) => {
@@ -367,9 +366,12 @@ const MigrationRow = ({ migration, isExpanded, onToggle }) => {
     return (
         <div className="border-b border-slate-100 last:border-b-0">
             <button onClick={onToggle} className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 transition-colors text-left">
-                <div className="w-32 sm:w-40 shrink-0">
-                    <p className="text-xs font-bold text-slate-800 truncate">{migration.clientName}</p>
-                    <p className="text-[10px] text-slate-400">n°{migration.numDossier}</p>
+                <div className="w-36 sm:w-48 shrink-0">
+                    <p className="text-xs font-bold text-slate-800 truncate">{migration.dossierName}</p>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="text-[10px] font-semibold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded shrink-0">n°{migration.numDossier}</span>
+                        {migration.interlocuteur && <span className="text-[10px] text-slate-400 truncate">{migration.interlocuteur}</span>}
+                    </div>
                 </div>
                 <div className="flex-1 min-w-0">
                     <MigrationTimelineMini currentIndex={migration.stageIndex} alea={migration.alea} casParticulier={migration.casParticulier} compact />
@@ -583,7 +585,7 @@ function MigrationDashboard() {
 
   const [backofficeData, setBackofficeData] = useState([]);
   const [encoursData, setEncoursData] = useState([]);
-  const [formationsData, setFormationsData] = useState([]);
+  const [specialEventsData, setSpecialEventsData] = useState([]);
   const [techList, setTechList] = useState(TECH_LIST_DEFAULT);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTech, setSelectedTech] = useState('Tous');
@@ -640,7 +642,7 @@ function MigrationDashboard() {
 
       if (json.backoffice) setBackofficeData(json.backoffice || []);
       if (json.encours) setEncoursData(json.encours || []);
-      if (json.formations) setFormationsData(json.formations || []);
+      if (json.specialEvents) setSpecialEventsData(json.specialEvents || []);
 
       setLastSyncTime(new Date());
       console.log("📍 Données métier chargées !");
@@ -1159,28 +1161,52 @@ function MigrationDashboard() {
       // considère la livraison enclenchée. À valider avec un vrai libellé
       // d'événement de finalisation si disponible.
       const stageIndex = (stage.index === 4 && livraisonEvent && !stage.alea) ? 5 : stage.index;
-      const clientName = dossier.interlocuteur || safeString(linkedEvents[0]?.DOSSIER) || `Dossier ${dossier.numDossier}`;
+      const dossierName = safeString(linkedEvents[0]?.DOSSIER) || dossier.interlocuteur || `Dossier ${dossier.numDossier}`;
 
-      // "Cas particulier" : première formation (V_EVENEMENT, TYPE_EVENEMENT =
-      // "Formation") rattachée au même OFFER_ID que la livraison, postérieure
-      // à celle-ci. On ne se fie plus à l'ordre chronologique brut des
-      // événements du dossier (trop de bruit : paiements, appels, échéances
-      // de contrat sans rapport avec la migration elle-même).
+      // "Cas particulier" : deux types possibles, on prend le plus proche
+      // dans le temps si les deux existent.
+      //  1. Formation ADAPPS — rattachée au même OFFER_ID que la livraison,
+      //     et planifiée dans les 60 jours qui suivent (pas au-delà).
+      //  2. Intervention matérielle sur site — l'OFFER_ID n'étant pas fiable
+      //     pour ce cas, on rapproche par numéro de dossier à la place, sans
+      //     limite de 60 jours (délai non précisé pour ce cas).
       const offerId = safeString(livraisonEvent?.OFFER_ID || analysisEvent?.OFFER_ID || '');
-      let casParticulier = null;
-      if (offerId) {
-        const afterDate = livraisonEvent?._date || parseDateSafe(analysisEvent?.DATE);
-        const matches = (formationsData || [])
-          .filter(f => safeString(f.OFFER_ID) === offerId)
-          .map(f => ({ ...f, _date: parseDateSafe(f.DATE) }))
-          .filter(f => f._date && (!afterDate || f._date > afterDate))
-          .sort((a, b) => a._date - b._date);
-        if (matches[0]) casParticulier = { label: safeString(matches[0].EVENEMENT || 'Formation'), date: matches[0]._date };
+      const afterDate = livraisonEvent?._date || parseDateSafe(analysisEvent?.DATE);
+      const maxFormationDate = afterDate ? new Date(afterDate.getTime() + 60 * 24 * 60 * 60 * 1000) : null;
+      const candidates = [];
+
+      if (offerId && afterDate) {
+        (specialEventsData || [])
+          .filter(e => safeString(e.TYPE_EVENEMENT) === 'Formation')
+          .filter(e => stripAccents(e.EVENEMENT).toLowerCase().includes('adapps'))
+          .filter(e => safeString(e.OFFER_ID) === offerId)
+          .forEach(e => {
+            const d = parseDateSafe(e.DATE);
+            if (d && d > afterDate && (!maxFormationDate || d <= maxFormationDate)) {
+              candidates.push({ label: safeString(e.EVENEMENT), date: d, kind: 'formation' });
+            }
+          });
       }
+
+      if (afterDate) {
+        (specialEventsData || [])
+          .filter(e => safeString(e.TYPE_EVENEMENT) === 'Technique')
+          .filter(e => stripAccents(e.EVENEMENT).toLowerCase().includes('materiel'))
+          .filter(e => safeString(e.NUMDOSSIER) === dossier.numDossier)
+          .forEach(e => {
+            const d = parseDateSafe(e.DATE);
+            if (d && d > afterDate) {
+              candidates.push({ label: safeString(e.EVENEMENT), date: d, kind: 'materiel' });
+            }
+          });
+      }
+
+      candidates.sort((a, b) => a.date - b.date);
+      const casParticulier = candidates[0] || null;
 
       return {
         ...dossier,
-        clientName,
+        dossierName,
         stageIndex,
         alea: stage.alea,
         analysisDate: parseDateSafe(analysisEvent?.DATE),
@@ -1188,7 +1214,7 @@ function MigrationDashboard() {
         casParticulier
       };
     }).sort((a, b) => (a.stageIndex || 0) - (b.stageIndex || 0));
-  }, [encoursData, backofficeData, formationsData, effectiveTechName, techList]);
+  }, [encoursData, backofficeData, specialEventsData, effectiveTechName, techList]);
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500 relative">
