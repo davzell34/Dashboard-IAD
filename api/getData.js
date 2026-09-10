@@ -188,7 +188,13 @@ export default async function handler(request, response) {
                     t.TICKET_ID,
                     LISTAGG(
                         REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-                            REGEXP_REPLACE(n.value:"Contenu Note"::string, '<[^>]+>', '')
+                            REGEXP_REPLACE(
+                                REGEXP_REPLACE(
+                                    REGEXP_REPLACE(n.value:"Contenu Note"::string, '<br[[:space:]]*/?>', '\n', 1, 0, 'i'),
+                                    '</(p|div|li|tr|td|h[1-6])>', '\n', 1, 0, 'i'
+                                ),
+                                '<[^>]+>', ' ', 1, 0, 'i'
+                            )
                         , '&eacute;','é'), '&egrave;','è'), '&agrave;','à'), '&ecirc;','ê'), '&ccedil;','ç'), '&ocirc;','ô'), '&ugrave;','ù'), '&nbsp;',' '), '&amp;','&'), '&gt;','>')
                     , '\n---\n') WITHIN GROUP (ORDER BY n.index) AS notes_clean
                 FROM SEPTEO_SHARE.POLE_AVOCAT.V_TICKET t, LATERAL FLATTEN(input => t.TIC_KPI_NOTES, outer => TRUE) n
