@@ -132,40 +132,44 @@ export default async function handler(request, response) {
             ${filtreTechs}
         `;
 
-        // --- REQUÊTE 3 : FORMATIONS (V_EVENEMENT, pas V_EVENEMENT_TECHNIQUE) ---
-        // Les événements de formation (ex. ADAPPS) ne sont pas dans la vue
-        // technique, mais dans la vue générale V_EVENEMENT, sur un
-        // TYPE_EVENEMENT différent. On les rapproche des migrations côté
-        // front via OFFER_ID (pas de filtre technicien : la formation peut
-        // être animée par quelqu'un d'autre que le technicien de migration).
-        // Fenêtre élargie de 90 jours après la fin du scope pour capter les
-        // formations planifiées après la mise en place.
+        // --- REQUÊTE 3 : ÉVÉNEMENTS "CAS PARTICULIER" (V_EVENEMENT, pas V_EVENEMENT_TECHNIQUE) ---
+        // Deux types d'événements qui dépendent de la fin de la migration,
+        // ni l'un ni l'autre dans la vue technique :
+        //  - Formation ADAPPS (TYPE_EVENEMENT = 'Formation', libellé contient "ADAPPS")
+        //  - Intervention matériel sur site (TYPE_EVENEMENT = 'Technique', libellé contient "matériel")
+        // Pas de filtre technicien : la formation ou l'intervention matériel
+        // peut être assignée à quelqu'un d'autre que le technicien de migration.
+        // Fenêtre élargie de 90 jours après la fin du scope pour les capter
+        // même si elles sont planifiées après la clôture de la période affichée.
         const formationRangeEndDate = new Date(`${rangeEnd}T00:00:00Z`);
         formationRangeEndDate.setUTCDate(formationRangeEndDate.getUTCDate() + 90);
         const formationRangeEnd = formationRangeEndDate.toISOString().split('T')[0];
 
-        const sqlFormations = `
+        const sqlSpecialEvents = `
             SELECT 
                 DATE,
                 EVENEMENT,
                 OFFER_ID,
-                NUMDOSSIER
+                NUMDOSSIER,
+                TYPE_EVENEMENT
             FROM V_EVENEMENT
-            WHERE TYPE_EVENEMENT = 'Formation'
-              AND OFFER_ID IS NOT NULL
-              AND DATE >= ? AND DATE <= ?
+            WHERE DATE >= ? AND DATE <= ?
+              AND (
+                    (TYPE_EVENEMENT = 'Formation' AND EVENEMENT ILIKE '%ADAPPS%')
+                 OR (TYPE_EVENEMENT = 'Technique' AND (EVENEMENT ILIKE '%materiel%' OR EVENEMENT ILIKE '%matériel%'))
+              )
         `;
 
         console.log(`Exécution requêtes filtrées [${rangeStart} → ${rangeEnd}], techs: ${techLastNames.join(', ')}...`);
         const backofficeRows = await runQuery(conn, sqlBackoffice, [rangeStart, rangeEnd, ...techBinds]);
         const encoursRows = await runQuery(conn, sqlEncours, [rangeStart, rangeEnd, ...techBinds]);
-        const formationRows = await runQuery(conn, sqlFormations, [rangeStart, formationRangeEnd]);
+        const specialEventRows = await runQuery(conn, sqlSpecialEvents, [rangeStart, formationRangeEnd]);
 
         response.status(200).json({
             message: "Données filtrées récupérées ✅",
             backoffice: backofficeRows,
             encours: encoursRows,
-            formations: formationRows,
+            specialEvents: specialEventRows,
             dateRange: { start: rangeStart, end: rangeEnd }
         });
 
