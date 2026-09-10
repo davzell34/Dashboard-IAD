@@ -190,6 +190,30 @@ const getRemainingLoad = (categorie, motif, weights) => {
     return w.defaut_autre;
 };
 
+// --- "MES MIGRATIONS" (prototype) : mêmes libellés d'événement que le moteur
+// de calcul principal, réutilisés ici pour repérer l'événement de kickoff
+// (analyse) d'un dossier.
+const ANALYSIS_EVENT_NAMES = ['Avocatmail - Analyse', 'Migration messagerie Adwin', 'Migration messagerie Adwin - analyse'];
+const MIGRATION_STAGES = ['Analyse', 'Tenant', 'Copie', 'Prêt', 'Livraison'];
+
+// Traduit la catégorie (et le motif) d'un ticket en position sur la frise.
+// HYPOTHÈSE À VALIDER : les catégories "attente"/"bloqué"/"suspendu" ne
+// précisent pas sur quelle étape principale elles se sont greffées — on les
+// affiche donc comme un badge "aléa" séparé plutôt que de leur inventer une
+// position precise sur la frise.
+const getMigrationStage = (categorie, motif) => {
+    const cleanCat = safeString(categorie).toLowerCase();
+    if (cleanCat.includes('suspendu')) return { index: 2, alea: 'Suspendu' };
+    if (cleanCat.includes('attente') && cleanCat.includes('client')) return { index: 2, alea: 'Attente client' };
+    if (cleanCat.includes('attente') && cleanCat.includes('presta')) return { index: 2, alea: 'Attente presta' };
+    if (cleanCat.includes('attente') || cleanCat.includes('bloqué')) return { index: 2, alea: 'Bloquée' };
+    if (cleanCat.includes('prêt pour mise en place')) return { index: 4, alea: null };
+    if (cleanCat.includes('copie en cours')) return { index: 3, alea: null };
+    if (cleanCat.includes('préparation tenant')) return { index: 2, alea: null };
+    if (cleanCat.includes('a planifier')) return { index: 1, alea: null };
+    return { index: 2, alea: null };
+};
+
 // --- COMPOSANTS UI ---
 
 // --- TOAST (remplace les alert() bloquants) ---
@@ -269,6 +293,57 @@ const TeamManagerPanel = ({ techList, newTechName, setNewTechName, onAdd, onRemo
         <p className="text-[10px] text-slate-400 mt-2">Le nom doit correspondre au champ Responsable dans Snowflake pour être reconnu.</p>
     </div>
 );
+
+// --- FRISE COMPACTE (une ligne, style flat) ---
+const MigrationTimelineMini = ({ currentIndex, alea }) => (
+    <div className="flex items-center w-full">
+        {MIGRATION_STAGES.map((stage, i) => {
+            const stepNum = i + 1;
+            const isDone = stepNum < currentIndex;
+            const isCurrent = stepNum === currentIndex;
+            return (
+                <React.Fragment key={stage}>
+                    <div className="flex flex-col items-center gap-1.5 shrink-0">
+                        <div className={`w-2.5 h-2.5 rounded-full transition-colors ${
+                            isCurrent ? (alea ? 'bg-amber-500 ring-4 ring-amber-100' : 'bg-blue-600 ring-4 ring-blue-100') :
+                            isDone ? 'bg-blue-300' : 'bg-slate-200'
+                        }`} />
+                        <span className={`text-[10px] font-medium whitespace-nowrap ${isCurrent ? 'text-slate-800' : isDone ? 'text-slate-400' : 'text-slate-300'}`}>{stage}</span>
+                    </div>
+                    {i < MIGRATION_STAGES.length - 1 && (
+                        <div className={`flex-1 h-0.5 mb-4 mx-1 rounded-full ${stepNum < currentIndex ? 'bg-blue-300' : 'bg-slate-150'}`} style={stepNum >= currentIndex ? { backgroundColor: '#EAECF0' } : undefined} />
+                    )}
+                </React.Fragment>
+            );
+        })}
+    </div>
+);
+
+// --- CARTE "MA MIGRATION" ---
+const MigrationCard = ({ migration }) => {
+    const formatDate = (d) => d ? d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : null;
+    return (
+        <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-start justify-between mb-4 gap-2">
+                <div>
+                    <h4 className="text-sm font-bold text-slate-800">{migration.clientName}</h4>
+                    <p className="text-[11px] text-slate-400">Dossier n°{migration.numDossier}</p>
+                </div>
+                {migration.alea && (
+                    <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-amber-50 text-amber-700 border border-amber-100">{migration.alea}</span>
+                )}
+            </div>
+            <MigrationTimelineMini currentIndex={migration.stageIndex} alea={migration.alea} />
+            {(migration.analysisDate || migration.livraisonDate) && (
+                <div className="flex items-center gap-3 mt-3 pt-3 border-t border-slate-100 text-[11px] text-slate-400">
+                    {migration.analysisDate && <span>Analyse : {formatDate(migration.analysisDate)}</span>}
+                    {migration.livraisonDate && <span>Planifié : {formatDate(migration.livraisonDate)}</span>}
+                </div>
+            )}
+        </div>
+    );
+};
+
 
 const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeights, onToast }) => {
     const [isEditing, setIsEditing] = useState(false);
@@ -409,7 +484,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 const KPICard = ({ title, value, subtext, icon: Icon, colorClass, active, onClick, isLoading }) => (
-  <div onClick={onClick} className={`px-4 py-3 rounded-lg shadow-sm border transition-all duration-300 flex items-center justify-between ${active ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-100' : 'bg-white border-slate-100'} ${onClick ? 'cursor-pointer hover:bg-slate-50' : ''}`}>
+  <div onClick={onClick} className={`px-4 py-3 rounded-xl shadow-sm border transition-all duration-300 flex items-center justify-between ${active ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-100' : 'bg-white border-slate-200/70'} ${onClick ? 'cursor-pointer hover:bg-slate-50' : ''}`}>
     <div>
       <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{title}</p>
       {isLoading ? (
@@ -421,7 +496,7 @@ const KPICard = ({ title, value, subtext, icon: Icon, colorClass, active, onClic
         </div>
       )}
     </div>
-    <div className={`p-2 rounded-md ${colorClass.replace('text-', 'bg-').replace('600', '50')}`}><Icon className={`w-5 h-5 ${colorClass}`} /></div>
+    <div className={`p-2.5 rounded-full ring-1 ring-inset ${colorClass.replace('text-', 'ring-').replace('600', '100')} ${colorClass.replace('text-', 'bg-').replace('600', '50')}`}><Icon className={`w-5 h-5 ${colorClass}`} /></div>
   </div>
 );
 
@@ -479,10 +554,12 @@ function MigrationDashboard() {
   const [isTeamManagerOpen, setIsTeamManagerOpen] = useState(false);
   const [newTechName, setNewTechName] = useState('');
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
+  const [activeView, setActiveView] = useState('dashboard'); // 'dashboard' | 'mine'
 
   const { getToken } = useAuth();
   const isAdmin = userEmail === ADMIN_EMAIL;
   const isDebugAllowed = isAdmin || (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug') === '1');
+  const currentTechName = normalizeTechName(user?.fullName, techList);
 
   const showToast = useCallback((message, type = 'success') => {
     setToast({ message, type });
@@ -990,11 +1067,50 @@ function MigrationDashboard() {
       }
   };
 
+  // --- "MES MIGRATIONS" (prototype) : un dossier par ligne active du technicien connecté ---
+  const myMigrations = useMemo(() => {
+    if (!currentTechName || currentTechName === 'Inconnu') return [];
+    const myTickets = (encoursData || []).filter(t => normalizeTechName(t.RESPONSABLE, techList) === currentTechName);
+
+    // Un dossier peut avoir plusieurs lignes de ticket ; on ne garde que la plus récente.
+    const byDossier = new Map();
+    myTickets.forEach(t => {
+      const numDossier = safeString(t.NUMERO_DOSSIER);
+      if (!numDossier) return;
+      const creeLe = parseDateSafe(t.CREE_LE);
+      const existing = byDossier.get(numDossier);
+      if (!existing || (creeLe && (!existing.creeLe || creeLe > existing.creeLe))) {
+        byDossier.set(numDossier, { numDossier, categorie: t.CATEGORIE, motif: t.MOTIF, interlocuteur: safeString(t.INTERLOCUTEUR), creeLe });
+      }
+    });
+
+    return Array.from(byDossier.values()).map(dossier => {
+      const linkedEvents = (backofficeData || []).filter(e => safeString(e.NUMDOSSIER) === dossier.numDossier);
+      const analysisEvent = linkedEvents.find(e => ANALYSIS_EVENT_NAMES.includes(safeString(e.EVENEMENT)));
+      const otherEvents = linkedEvents.filter(e => e !== analysisEvent);
+      const stage = getMigrationStage(dossier.categorie, dossier.motif);
+      // Heuristique : si "Prêt pour mise en place" ET qu'un événement de
+      // planification (hors analyse) existe déjà pour ce dossier, on
+      // considère la livraison enclenchée. À valider avec un vrai libellé
+      // d'événement de finalisation si disponible.
+      const stageIndex = (stage.index === 4 && otherEvents.length > 0 && !stage.alea) ? 5 : stage.index;
+      const clientName = dossier.interlocuteur || safeString(linkedEvents[0]?.DOSSIER) || `Dossier ${dossier.numDossier}`;
+      return {
+        ...dossier,
+        clientName,
+        stageIndex,
+        alea: stage.alea,
+        analysisDate: parseDateSafe(analysisEvent?.DATE),
+        livraisonDate: parseDateSafe(otherEvents[0]?.DATE)
+      };
+    }).sort((a, b) => (a.stageIndex || 0) - (b.stageIndex || 0));
+  }, [encoursData, backofficeData, currentTechName, techList]);
+
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500 relative">
-      <header className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
+      <header className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200/70 shadow-sm">
         <div className="flex items-center gap-3">
-          <div className="bg-blue-100 p-2 rounded-md">{isLoading ? <Loader className="w-5 h-5 text-blue-600 animate-spin" /> : <Activity className="w-5 h-5 text-blue-600" />}</div>
+          <div className="bg-blue-50 p-2.5 rounded-full ring-1 ring-blue-100">{isLoading ? <Loader className="w-5 h-5 text-blue-600 animate-spin" /> : <Activity className="w-5 h-5 text-blue-600" />}</div>
           <div>
             <h1 className="text-lg font-bold text-slate-800 leading-tight">Pilotage Migrations</h1>
             <p className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
@@ -1105,8 +1221,26 @@ function MigrationDashboard() {
         </div>
       )}
 
+      <div className="flex gap-1 mb-4 bg-slate-100/70 p-1 rounded-lg w-fit">
+        <button
+          onClick={() => setActiveView('dashboard')}
+          className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${activeView === 'dashboard' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          Vue équipe
+        </button>
+        <button
+          onClick={() => setActiveView('mine')}
+          className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${activeView === 'mine' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          Mes migrations
+          {myMigrations.length > 0 && <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px]">{myMigrations.length}</span>}
+        </button>
+      </div>
+
+      {activeView === 'dashboard' && (
+      <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-        <div onClick={() => { setShowPlanning(!showPlanning); setSelectedMonth(null); }} className={`px-4 py-3 rounded-lg shadow-sm border flex flex-col justify-center cursor-pointer transition-all duration-200 gap-3 ${showPlanning ? 'bg-indigo-50 border-indigo-200 ring-2 ring-indigo-100' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
+        <div onClick={() => { setShowPlanning(!showPlanning); setSelectedMonth(null); }} className={`px-4 py-3 rounded-xl shadow-sm border flex flex-col justify-center cursor-pointer transition-all duration-200 gap-3 ${showPlanning ? 'bg-indigo-50 border-indigo-200 ring-2 ring-indigo-100' : 'bg-white border-slate-200/70 hover:bg-slate-50'}`}>
             <PipeProgress label="Prêt pour Mise en Place" count={planningCount} colorClass="text-indigo-600" barColor="bg-indigo-500" />
             <PipeProgress label="Prêt pour Analyse" count={analysisPipeCount} colorClass="text-cyan-600" barColor="bg-cyan-500" />
         </div>
@@ -1115,7 +1249,7 @@ function MigrationDashboard() {
         <KPICard title="Taux Couverture" value={`${kpiStats.ratio.toFixed(0)}%`} subtext="Capa. / Besoin" icon={TrendingUp} colorClass={kpiStats.ratio >= 100 ? COLORS.text_ok : COLORS.text_danger} active={!!selectedMonth} isLoading={isLoading}/>
       </div>
 
-      <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 mb-4">
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200/70 mb-4">
         <div className="flex flex-col sm:flex-row items-center justify-between mb-4 gap-4">
             <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">
                 <button onClick={() => toggleViewMode('months')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${!selectedMonth ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Vue Annuelle (Mois)</button>
@@ -1159,7 +1293,7 @@ function MigrationDashboard() {
         {!selectedMonth && <p className="text-[10px] text-center text-slate-400 italic mt-1">Cliquez sur un mois pour voir le détail par semaine</p>}
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden mb-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200/70 overflow-hidden mb-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
         <button onClick={() => setIsDetailListExpanded(!isDetailListExpanded)} className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors">
           <div className="flex items-center gap-2"><FileText className="w-4 h-4 text-slate-400" /><h2 className="text-sm font-bold text-slate-800">Détail des Opérations {selectedTech !== 'Tous' ? `: ${selectedTech}` : "(Tous)"}</h2><span className="ml-2 text-xs font-normal text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">{filteredAndSortedEvents.length} entrées</span></div>
           {isDetailListExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
@@ -1262,7 +1396,7 @@ function MigrationDashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
-        <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden h-fit">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200/70 overflow-hidden h-fit">
             <button onClick={() => setIsTechChartExpanded(!isTechChartExpanded)} className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors">
                 <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Users className="w-4 h-4 text-slate-400" />Charge par Tech {selectedMonth ? `(${formatMonth(selectedMonth)})` : "(Globale)"}</h2>
                 {isTechChartExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
@@ -1286,7 +1420,7 @@ function MigrationDashboard() {
         <div className="hidden lg:block"></div> 
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden mb-16">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200/70 overflow-hidden mb-16">
         <button onClick={() => setIsTableExpanded(!isTableExpanded)} className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors">
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2"><TableIcon className="w-4 h-4 text-slate-400" />Résultats Mensuels Détaillés (Globaux)</h2>
           {isTableExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
@@ -1318,6 +1452,30 @@ function MigrationDashboard() {
           </div>
         )}
       </div>
+      </>
+      )}
+
+      {activeView === 'mine' && (
+        <div>
+          <div className="mb-4">
+            <h2 className="text-base font-bold text-slate-800">Mes migrations en cours</h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {currentTechName === 'Inconnu'
+                ? "Votre nom n'a pas été reconnu dans l'équipe technique — vérifiez la correspondance avec votre profil Clerk."
+                : `Suivi des dossiers actifs assignés à ${currentTechName}, basé sur la catégorie du ticket.`}
+            </p>
+          </div>
+          {myMigrations.length === 0 ? (
+            <div className="bg-white p-8 rounded-xl border border-slate-200/80 text-center text-sm text-slate-400 italic">
+              Aucun dossier actif trouvé pour le moment.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {myMigrations.map(m => <MigrationCard key={m.numDossier} migration={m} />)}
+            </div>
+          )}
+        </div>
+      )}
 
       <RulesModal 
         isOpen={isRulesModalOpen} 
