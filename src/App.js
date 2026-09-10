@@ -560,6 +560,8 @@ function MigrationDashboard() {
   const isAdmin = userEmail === ADMIN_EMAIL;
   const isDebugAllowed = isAdmin || (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug') === '1');
   const currentTechName = normalizeTechName(user?.fullName, techList);
+  const [viewAsTech, setViewAsTech] = useState(null);
+  const effectiveTechName = (isAdmin && viewAsTech) ? viewAsTech : currentTechName;
 
   const showToast = useCallback((message, type = 'success') => {
     setToast({ message, type });
@@ -1069,8 +1071,8 @@ function MigrationDashboard() {
 
   // --- "MES MIGRATIONS" (prototype) : un dossier par ligne active du technicien connecté ---
   const myMigrations = useMemo(() => {
-    if (!currentTechName || currentTechName === 'Inconnu') return [];
-    const myTickets = (encoursData || []).filter(t => normalizeTechName(t.RESPONSABLE, techList) === currentTechName);
+    if (!effectiveTechName || effectiveTechName === 'Inconnu') return [];
+    const myTickets = (encoursData || []).filter(t => normalizeTechName(t.RESPONSABLE, techList) === effectiveTechName);
 
     // Un dossier peut avoir plusieurs lignes de ticket ; on ne garde que la plus récente.
     const byDossier = new Map();
@@ -1104,7 +1106,7 @@ function MigrationDashboard() {
         livraisonDate: parseDateSafe(otherEvents[0]?.DATE)
       };
     }).sort((a, b) => (a.stageIndex || 0) - (b.stageIndex || 0));
-  }, [encoursData, backofficeData, currentTechName, techList]);
+  }, [encoursData, backofficeData, effectiveTechName, techList]);
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500 relative">
@@ -1457,13 +1459,28 @@ function MigrationDashboard() {
 
       {activeView === 'mine' && (
         <div>
-          <div className="mb-4">
-            <h2 className="text-base font-bold text-slate-800">Mes migrations en cours</h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              {currentTechName === 'Inconnu'
-                ? "Votre nom n'a pas été reconnu dans l'équipe technique — vérifiez la correspondance avec votre profil Clerk."
-                : `Suivi des dossiers actifs assignés à ${currentTechName}, basé sur la catégorie du ticket.`}
-            </p>
+          <div className="mb-4 flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <h2 className="text-base font-bold text-slate-800">Mes migrations en cours</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {effectiveTechName === 'Inconnu'
+                  ? "Votre nom n'a pas été reconnu dans l'équipe technique — vérifiez la correspondance avec votre profil Clerk."
+                  : `Suivi des dossiers actifs assignés à ${effectiveTechName}, basé sur la catégorie du ticket.`}
+              </p>
+            </div>
+            {isAdmin && (
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Visualiser en tant que</label>
+                <select
+                  value={viewAsTech || ''}
+                  onChange={(e) => setViewAsTech(e.target.value || null)}
+                  className="text-sm border border-slate-200 rounded-md py-1.5 px-2 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="">Moi ({currentTechName})</option>
+                  {techList.map(tech => (<option key={tech} value={tech}>{tech}</option>))}
+                </select>
+              </div>
+            )}
           </div>
           {myMigrations.length === 0 ? (
             <div className="bg-white p-8 rounded-xl border border-slate-200/80 text-center text-sm text-slate-400 italic">
