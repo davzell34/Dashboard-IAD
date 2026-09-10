@@ -1,6 +1,31 @@
 import { verifyToken } from '@clerk/backend';
 const { createSnowflakeConnection } = require('./_snowflake');
 
+// Liste de secours si le front n'envoie rien ou envoie une valeur invalide.
+const DEFAULT_TECH_LAST_NAMES = ['AYAT', 'MESSIN', 'GROSSI', 'SAUROIS', 'GAMONDES'];
+
+// Valide un format YYYY-MM-DD simple pour éviter d'injecter n'importe quoi
+// dans les binds Snowflake.
+const isValidDate = (str) => typeof str === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(str);
+
+// Extrait les noms de famille (dernier mot de chaque "Prénom NOM") depuis le
+// paramètre `techs` (JSON stringifié envoyé par le front), pour construire le
+// filtre ILIKE dynamiquement plutôt que sur une liste figée dans le code.
+const getTechLastNames = (techsParam) => {
+  try {
+    const parsed = JSON.parse(techsParam);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      const names = parsed
+        .map(t => String(t).trim().split(' ').pop().toUpperCase())
+        .filter(Boolean);
+      if (names.length > 0) return names;
+    }
+  } catch (e) {
+    // paramètre absent ou invalide : on retombe sur la liste par défaut
+  }
+  return DEFAULT_TECH_LAST_NAMES;
+};
+
 export default async function handler(request, response) {
   
   // 1. SÉCURITÉ
@@ -10,6 +35,11 @@ export default async function handler(request, response) {
   }
 
   const token = authHeader.split(' ')[1];
+
+  // 1bis. SCOPE DE DATES (envoyé par le front, avec repli sur les valeurs par défaut)
+  const rangeStart = isValidDate(request.query?.start) ? request.query.start : DEFAULT_DATE_START;
+  const rangeEnd = isValidDate(request.query?.end) ? request.query.end : DEFAULT_DATE_END;
+  const techLastNames = getTechLastNames(request.query?.techs);
 
   try {
     if (process.env.CLERK_SECRET_KEY) {
@@ -23,10 +53,11 @@ export default async function handler(request, response) {
   // 2. CONNEXION
   const connection = createSnowflakeConnection();
 
-  const runQuery = (conn, sql) => {
+  const runQuery = (conn, sql, binds = []) => {
     return new Promise((resolve, reject) => {
       conn.execute({
         sqlText: sql,
+        binds,
         complete: (err, stmt, rows) => {
           if (err) reject(err);
           else resolve(rows);
@@ -45,18 +76,14 @@ export default async function handler(request, response) {
 
       try {
         // --- FILTRE RESPONSABLES (Réutilisable) ---
-        // Utilisation de ILIKE pour ignorer la casse (majuscule/minuscule)
-        const filtreTechs = `
-            AND (
-                 RESPONSABLE ILIKE '%AYAT%' 
-              OR RESPONSABLE ILIKE '%MESSIN%' 
-              OR RESPONSABLE ILIKE '%GROSSI%' 
-              OR RESPONSABLE ILIKE '%SAUROIS%' 
-              OR RESPONSABLE ILIKE '%GAMONDES%'
-            )
-        `;
+        // Construit dynamiquement à partir de la liste envoyée par le front
+        // (gérée dans l'UI), avec ILIKE pour ignorer la casse.
+        const filtreTechs = `AND (${techLastNames.map(() => 'RESPONSABLE ILIKE ?').join(' OR ')})`;
+        const techBinds = techLastNames.map(name => `%${name}%`);
 
         // --- REQUÊTE 1 : BACKOFFICE ---
+        // Chargée intégralement sur le scope de dates (nécessaire au calcul de
+        // capacité / absorption des besoins) : pas de pagination ici.
         const sqlBackoffice = `
             SELECT 
                 DATE, 
@@ -69,12 +96,17 @@ export default async function handler(request, response) {
                 NUMDOSSIER, 
                 "USER" as NB_USERS -- Alias pour compatibilité frontend
             FROM V_EVENEMENT_TECHNIQUE
-            WHERE DATE >= '2025-01-01' AND DATE <= '2026-12-31'
+            WHERE DATE >= ? AND DATE <= ?
             ${filtreTechs}
             ORDER BY DATE DESC
         `;
 
         // --- REQUÊTE 2 : EN COURS ---
+        // Chargée intégralement elle aussi : les KPI, graphiques et compteurs
+        // "Prêt pour..." sont calculés côté front à partir de TOUT le backlog
+        // sur le scope de dates. La pagination visible dans l'UI (tableau
+        // "Détail des Opérations") se fait uniquement côté affichage, une fois
+        // les données chargées, pour ne pas fausser les agrégats.
         const sqlEncours = `
             SELECT 
                 ETAT_PRIORITE,
@@ -89,19 +121,20 @@ export default async function handler(request, response) {
                 CATEGORIE,
                 INTERLOCUTEUR
             FROM V_TICKETS_SERVICE_TECHNIQUE
-            WHERE COALESCE(REPORTE_LE, DERNIERE_ACTION) >= '2025-01-01' 
-              AND COALESCE(REPORTE_LE, DERNIERE_ACTION) <= '2026-12-31'
+            WHERE COALESCE(REPORTE_LE, DERNIERE_ACTION) >= ? 
+              AND COALESCE(REPORTE_LE, DERNIERE_ACTION) <= ?
             ${filtreTechs}
         `;
 
-        console.log("Exécution requêtes filtrées...");
-        const backofficeRows = await runQuery(conn, sqlBackoffice);
-        const encoursRows = await runQuery(conn, sqlEncours);
+        console.log(`Exécution requêtes filtrées [${rangeStart} → ${rangeEnd}], techs: ${techLastNames.join(', ')}...`);
+        const backofficeRows = await runQuery(conn, sqlBackoffice, [rangeStart, rangeEnd, ...techBinds]);
+        const encoursRows = await runQuery(conn, sqlEncours, [rangeStart, rangeEnd, ...techBinds]);
 
         response.status(200).json({
             message: "Données filtrées récupérées ✅",
             backoffice: backofficeRows,
-            encours: encoursRows
+            encours: encoursRows,
+            dateRange: { start: rangeStart, end: rangeEnd }
         });
 
       } catch (queryErr) {
