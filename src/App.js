@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
   BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  LineChart, Line, AreaChart, Area, ComposedChart, ReferenceLine, RadialBarChart, RadialBar
+  LineChart, Line, AreaChart, Area, ComposedChart, ReferenceLine, ReferenceArea, RadialBarChart, RadialBar
 } from 'recharts';
 import { 
   Activity, Users, Clock, TrendingUp, AlertTriangle, CheckCircle, 
@@ -166,6 +166,19 @@ const getWeekEndDate = (dateStr) => {
     return sunday;
 };
 
+// Retourne le lundi (début de semaine) d'une date donnée — utile pour
+// dater l'axe par semaine et pour rattacher chaque semaine à son mois.
+const getWeekStartDate = (dateStr) => {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return null;
+    const day = date.getDay();
+    const diffToMonday = date.getDate() - day + (day === 0 ? -6 : 1);
+    const monday = new Date(date);
+    monday.setDate(diffToMonday);
+    monday.setHours(0, 0, 0, 0);
+    return monday;
+};
+
 const parseDateSafe = (dateStr) => {
     if (!dateStr) return null;
     let cleanStr = String(dateStr);
@@ -324,7 +337,7 @@ const DateScopePanel = ({ dateScopeDraft, setDateScopeDraft, onApply, onClose, i
         <p className="text-[10px] text-slate-400 mb-3">Réduit ou élargit le volume de données remonté depuis Snowflake. Recharge les données après sauvegarde.</p>
         <div className="flex justify-end gap-2">
             <button onClick={onClose} className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-md transition-colors">Annuler</button>
-            <button onClick={onApply} disabled={isSaving} className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-md font-bold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1">
+            <button onClick={() => onApply()} disabled={isSaving} className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-md font-bold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1">
                 {isSaving ? <Loader size={12} className="animate-spin" /> : <Save size={12} />} Appliquer
             </button>
         </div>
@@ -429,11 +442,10 @@ const MigrationRow = ({ migration, isExpanded, onToggle }) => {
                         <MigrationTimelineMini currentIndex={migration.stageIndex} alea={migration.alea} casParticulier={migration.casParticulier} compact />
                     )}
                 </div>
-                <div className="flex-1" />
                 {migration.alea && (
                     <span className="hidden sm:inline shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase bg-amber-50 text-amber-700 border border-amber-100">{migration.alea}</span>
                 )}
-                <ChevronDown size={14} className={`shrink-0 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                <ChevronDown size={14} className={`shrink-0 ml-auto text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
             </button>
             {isExpanded && (
                 <div className="px-4 pb-4 pt-2 bg-slate-50/60 animate-in fade-in duration-150">
@@ -775,13 +787,14 @@ function MigrationDashboard() {
   }, [fetchBusinessData]);
 
   // --- SCOPE DE DATES : sauvegarde + rechargement des données sur ce nouveau scope ---
-  const handleApplyDateScope = async () => {
-      if (!dateScopeDraft.start || !dateScopeDraft.end || dateScopeDraft.start > dateScopeDraft.end) {
+  const handleApplyDateScope = async (rangeOverride) => {
+      const range = rangeOverride || dateScopeDraft;
+      if (!range.start || !range.end || range.start > range.end) {
           showToast("Merci de vérifier les dates (début doit précéder la fin).", 'error');
           return;
       }
       setIsSavingDateScope(true);
-      const updatedConfig = { ...weightsConfig, date_range_start: dateScopeDraft.start, date_range_end: dateScopeDraft.end };
+      const updatedConfig = { ...weightsConfig, date_range_start: range.start, date_range_end: range.end };
       try {
           const response = await fetch('/api/saveConfig', {
               method: 'POST',
@@ -791,16 +804,28 @@ function MigrationDashboard() {
           if (!response.ok) throw new Error("Échec sauvegarde du scope de dates.");
           setWeightsConfig(updatedConfig);
           writeCache('config', updatedConfig, CONFIG_CACHE_TTL_MS);
+          setDateScopeDraft(range);
           setIsDateScopeOpen(false);
           setCurrentPage(1);
           showToast("Scope de dates mis à jour.", 'success');
-          await fetchBusinessData(dateScopeDraft, techList, { forceRefresh: true });
+          await fetchBusinessData(range, techList, { forceRefresh: true });
       } catch (e) {
           console.error("Erreur sauvegarde scope de dates:", e);
           showToast("Erreur lors de la sauvegarde du scope de dates.", 'error');
       } finally {
           setIsSavingDateScope(false);
       }
+  };
+
+  // Raccourci "toute l'année" : élargit le scope sans avoir à ouvrir le
+  // panneau et taper les dates à la main. Couvre 6 mois avant à 6 mois après
+  // aujourd'hui, en jours calendaires (une base large, ajustable ensuite via
+  // le panneau si besoin).
+  const handleQuickYearScope = () => {
+      const now = new Date();
+      const start = new Date(now); start.setMonth(start.getMonth() - 6);
+      const end = new Date(now); end.setMonth(end.getMonth() + 6);
+      handleApplyDateScope({ start: toLocalDateString(start), end: toLocalDateString(end) });
   };
 
   // --- ÉQUIPE : ajout / suppression d'un technicien, persisté dans la même config partagée ---
@@ -1200,7 +1225,10 @@ function MigrationDashboard() {
           const weekRange = getWeekRange(evt.date);
           const label = `${weekNum} (${weekRange})`;
           if (!weekMap.has(key)) {
-              weekMap.set(key, { month: key, label, shortLabel: weekNum, year: d.getFullYear(), weekSort: parseInt(weekNum.replace('S', '')), besoin: 0, besoin_encours: 0, capacite: 0, weekEnd: getWeekEndDate(evt.date) });
+              const weekStart = getWeekStartDate(evt.date);
+              const dateLabel = weekStart ? weekStart.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) : weekNum;
+              const monthKey = weekStart ? `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}` : null;
+              weekMap.set(key, { month: key, label, shortLabel: weekNum, dateLabel, monthKey, year: d.getFullYear(), weekSort: parseInt(weekNum.replace('S', '')), besoin: 0, besoin_encours: 0, capacite: 0, weekEnd: getWeekEndDate(evt.date) });
           }
           const entry = weekMap.get(key);
           entry.besoin += (evt.raw_besoin || 0);
@@ -1212,6 +1240,27 @@ function MigrationDashboard() {
         .map(w => ({ ...w, isPast: w.weekEnd ? w.weekEnd < now : false }))
         .sort((a, b) => a.year - b.year || a.weekSort - b.weekSort);
   }, [eventsData, selectedTech]);
+
+  // Bandes de fond alternées par mois, pour repérer visuellement où commence
+  // et finit chaque mois dans la vue "Toutes les Semaines".
+  const monthBands = useMemo(() => {
+      if (chartMode !== 'weeks-all' || allWeeksAggregatedData.length === 0) return [];
+      const bands = [];
+      let current = null;
+      allWeeksAggregatedData.forEach(w => {
+          if (!current || current.monthKey !== w.monthKey) {
+              if (current) bands.push(current);
+              current = { monthKey: w.monthKey, start: w.dateLabel, end: w.dateLabel };
+          }
+          current.end = w.dateLabel;
+      });
+      if (current) bands.push(current);
+      return bands.map((b, i) => ({
+          ...b,
+          label: b.monthKey ? new Date(`${b.monthKey}-01T00:00:00`).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }) : '',
+          shaded: i % 2 === 1
+      }));
+  }, [allWeeksAggregatedData, chartMode]);
 
   const mainChartData = chartMode === 'months' ? monthlyAggregatedData : chartMode === 'weeks-all' ? allWeeksAggregatedData : weeklyAggregatedData;
 
@@ -1475,7 +1524,7 @@ function MigrationDashboard() {
                 <span className="text-slate-400 text-xs">→</span>
                 <input type="date" value={dateScopeDraft.end || ''} onChange={(e) => setDateScopeDraft(d => ({ ...d, end: e.target.value }))} className="flex-1 text-sm border border-slate-200 rounded-md py-2 px-2" />
               </div>
-              <button onClick={handleApplyDateScope} disabled={isSavingDateScope} className="mt-2 w-full px-3 py-2 text-xs bg-blue-600 text-white rounded-md font-bold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-1">
+              <button onClick={() => handleApplyDateScope()} disabled={isSavingDateScope} className="mt-2 w-full px-3 py-2 text-xs bg-blue-600 text-white rounded-md font-bold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-1">
                 {isSavingDateScope ? <Loader size={12} className="animate-spin" /> : <Save size={12} />} Appliquer le scope
               </button>
             </div>
@@ -1544,10 +1593,21 @@ function MigrationDashboard() {
             </div>
           ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={mainChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }} onClick={handleChartClick}>
+            <ComposedChart data={mainChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }} onClick={handleChartClick} barGap={3} barCategoryGap={chartMode === 'weeks-all' ? '20%' : '30%'}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+              {chartMode === 'weeks-all' && monthBands.filter(b => b.shaded).map((b, i) => (
+                <ReferenceArea
+                  key={i}
+                  x1={b.start}
+                  x2={b.end}
+                  fill="#F1F5F9"
+                  fillOpacity={0.6}
+                  ifOverflow="visible"
+                  label={{ value: b.label, position: 'insideTop', fontSize: 10, fill: '#94a3b8' }}
+                />
+              ))}
               <XAxis 
-                dataKey={chartMode === 'months' ? "month" : chartMode === 'weeks-all' ? "shortLabel" : "label"} 
+                dataKey={chartMode === 'months' ? "month" : chartMode === 'weeks-all' ? "dateLabel" : "label"} 
                 axisLine={false} 
                 tickLine={false} 
                 tick={{fill: '#64748b', fontSize: 10}} 
@@ -1555,18 +1615,18 @@ function MigrationDashboard() {
                 angle={chartMode === 'weeks-all' ? -45 : 0}
                 textAnchor={chartMode === 'weeks-all' ? 'end' : 'middle'}
                 height={chartMode === 'weeks-all' ? 45 : 30}
-                tickFormatter={(val) => { if (String(val).startsWith('S')) return val; return formatMonthShort(val); }} 
+                tickFormatter={(val) => chartMode === 'months' ? formatMonthShort(val) : val}
                 interval={0} 
               />
               <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} />
               <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(0,0,0,0.05)' }} />
-              <Bar stackId="a" dataKey="besoin" fill={COLORS.besoin} radius={[0, 0, 0, 0]} barSize={chartMode === 'weeks-month' ? 30 : chartMode === 'weeks-all' ? 12 : 16}>
+              <Bar stackId="a" dataKey="besoin" fill={COLORS.besoin} radius={[0, 0, 0, 0]} barSize={chartMode === 'weeks-month' ? 28 : chartMode === 'weeks-all' ? 14 : 18}>
                 {mainChartData.map((entry, i) => (<Cell key={i} fillOpacity={entry.isPast ? 0.3 : 1} />))}
               </Bar>
-              <Bar stackId="a" dataKey="besoin_encours" fill={COLORS.encours} radius={[3, 3, 0, 0]} barSize={chartMode === 'weeks-month' ? 30 : chartMode === 'weeks-all' ? 12 : 16}>
+              <Bar stackId="a" dataKey="besoin_encours" fill={COLORS.encours} radius={[3, 3, 0, 0]} barSize={chartMode === 'weeks-month' ? 28 : chartMode === 'weeks-all' ? 14 : 18}>
                 {mainChartData.map((entry, i) => (<Cell key={i} fillOpacity={entry.isPast ? 0.3 : 1} />))}
               </Bar>
-              <Bar stackId="b" dataKey="capacite" fill={COLORS.capacite} radius={[3, 3, 0, 0]} barSize={chartMode === 'weeks-month' ? 30 : chartMode === 'weeks-all' ? 12 : 16}>
+              <Bar stackId="b" dataKey="capacite" fill={COLORS.capacite} radius={[3, 3, 0, 0]} barSize={chartMode === 'weeks-month' ? 28 : chartMode === 'weeks-all' ? 14 : 18}>
                 {mainChartData.map((entry, i) => (<Cell key={i} fillOpacity={entry.isPast ? 0.3 : 1} />))}
               </Bar>
             </ComposedChart>
@@ -1759,7 +1819,27 @@ function MigrationDashboard() {
               </p>
             </div>
             {isAdmin && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="relative">
+                  <button
+                    onClick={() => { setDateScopeDraft({ start: weightsConfig.date_range_start, end: weightsConfig.date_range_end }); setIsDateScopeOpen(o => !o); }}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-md hover:bg-slate-50 transition-colors"
+                    title="Élargir ou réduire la période affichée"
+                  >
+                    <Calendar size={13} /> Scope de dates
+                  </button>
+                  {isDateScopeOpen && (
+                    <DateScopePanel dateScopeDraft={dateScopeDraft} setDateScopeDraft={setDateScopeDraft} onApply={handleApplyDateScope} onClose={() => setIsDateScopeOpen(false)} isSaving={isSavingDateScope} />
+                  )}
+                </div>
+                <button
+                  onClick={handleQuickYearScope}
+                  disabled={isSavingDateScope}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-100 rounded-md hover:bg-blue-100 transition-colors disabled:opacity-50"
+                  title="Élargit le scope à 6 mois avant / 6 mois après aujourd'hui"
+                >
+                  {isSavingDateScope ? <Loader size={13} className="animate-spin" /> : <CalendarClock size={13} />} Voir toute l'année
+                </button>
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Visualiser en tant que</label>
                 <select
                   value={viewAsTech || ''}
