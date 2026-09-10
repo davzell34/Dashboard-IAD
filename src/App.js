@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
   BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   LineChart, Line, AreaChart, Area, ComposedChart, ReferenceLine, RadialBarChart, RadialBar
@@ -7,7 +7,8 @@ import {
   Activity, Users, Clock, TrendingUp, AlertTriangle, CheckCircle, 
   Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Loader,
   ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout, Search, Layers, Server, FileSearch, Terminal,
-  Calculator, Database, BookOpen, Settings, Save, RotateCcw
+  Calculator, Database, BookOpen, Settings, Save, RotateCcw, Plus, Trash2, SlidersHorizontal, RefreshCw,
+  CheckCircle2, AlertCircle
 } from 'lucide-react';
 import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
 
@@ -31,8 +32,16 @@ const DEFAULT_WEIGHTS = {
     attente_bloque: 0.05,
     suspendu: 0.0,
     defaut_autre: 0.50,
-    prepa_avocatmail_motif: 0.50 
+    prepa_avocatmail_motif: 0.50,
+    // Scope de dates envoyé au backend pour limiter le volume de données
+    // remontées de Snowflake. Modifiable dans l'en-tête par un admin, et
+    // persisté avec le reste de la config (mêmes valeurs par défaut que
+    // DEFAULT_DATE_START/END côté api/getData.js).
+    date_range_start: '2025-10-01',
+    date_range_end: '2026-03-01'
 };
+
+const DETAIL_TABLE_PAGE_SIZE = 25;
 
 const COLORS = {
     besoin: "#60a5fa", encours: "#fb923c", capacite: "#34d399",
@@ -183,7 +192,85 @@ const getRemainingLoad = (categorie, motif, weights) => {
 
 // --- COMPOSANTS UI ---
 
-const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeights }) => {
+// --- TOAST (remplace les alert() bloquants) ---
+const Toast = ({ toast, onClose }) => {
+    useEffect(() => {
+        if (!toast) return;
+        const timer = setTimeout(onClose, 4000);
+        return () => clearTimeout(timer);
+    }, [toast, onClose]);
+
+    if (!toast) return null;
+    const isError = toast.type === 'error';
+    return (
+        <div className={`fixed bottom-4 right-4 z-[100] max-w-sm w-full sm:w-auto flex items-start gap-2 px-4 py-3 rounded-lg shadow-xl border animate-in fade-in slide-in-from-bottom-4 duration-200 ${isError ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+            {isError ? <AlertCircle size={16} className="shrink-0 mt-0.5" /> : <CheckCircle2 size={16} className="shrink-0 mt-0.5" />}
+            <p className="text-xs font-medium leading-snug">{toast.message}</p>
+            <button onClick={onClose} className="ml-auto text-current opacity-60 hover:opacity-100"><X size={14} /></button>
+        </div>
+    );
+};
+
+// --- SKELETON (état de chargement) ---
+const Skeleton = ({ className = "", style }) => (
+    <div className={`animate-pulse bg-slate-200/70 rounded ${className}`} style={style} />
+);
+
+// --- PANNEAU : SCOPE DE DATES (admin) ---
+const DateScopePanel = ({ dateScopeDraft, setDateScopeDraft, onApply, onClose, isSaving }) => (
+    <div className="absolute right-0 mt-2 w-72 bg-white border border-slate-200 rounded-lg shadow-xl z-50 p-4 animate-in fade-in slide-in-from-top-2 duration-150">
+        <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-3">Scope de dates (Snowflake)</h4>
+        <div className="space-y-2 mb-3">
+            <label className="block text-xs text-slate-600">
+                Début
+                <input type="date" value={dateScopeDraft.start || ''} onChange={(e) => setDateScopeDraft(d => ({ ...d, start: e.target.value }))} className="mt-1 w-full text-sm border border-slate-200 rounded-md py-1.5 px-2 focus:ring-1 focus:ring-blue-500 outline-none" />
+            </label>
+            <label className="block text-xs text-slate-600">
+                Fin
+                <input type="date" value={dateScopeDraft.end || ''} onChange={(e) => setDateScopeDraft(d => ({ ...d, end: e.target.value }))} className="mt-1 w-full text-sm border border-slate-200 rounded-md py-1.5 px-2 focus:ring-1 focus:ring-blue-500 outline-none" />
+            </label>
+        </div>
+        <p className="text-[10px] text-slate-400 mb-3">Réduit ou élargit le volume de données remonté depuis Snowflake. Recharge les données après sauvegarde.</p>
+        <div className="flex justify-end gap-2">
+            <button onClick={onClose} className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-md transition-colors">Annuler</button>
+            <button onClick={onApply} disabled={isSaving} className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-md font-bold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1">
+                {isSaving ? <Loader size={12} className="animate-spin" /> : <Save size={12} />} Appliquer
+            </button>
+        </div>
+    </div>
+);
+
+// --- PANNEAU : GESTION DE L'ÉQUIPE (admin) ---
+const TeamManagerPanel = ({ techList, newTechName, setNewTechName, onAdd, onRemove, onClose }) => (
+    <div className="absolute right-0 mt-2 w-72 bg-white border border-slate-200 rounded-lg shadow-xl z-50 p-4 animate-in fade-in slide-in-from-top-2 duration-150">
+        <div className="flex items-center justify-between mb-3">
+            <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500">Équipe technique</h4>
+            <button onClick={onClose}><X size={14} className="text-slate-400 hover:text-slate-600" /></button>
+        </div>
+        <ul className="space-y-1 mb-3 max-h-40 overflow-y-auto">
+            {techList.map(tech => (
+                <li key={tech} className="flex items-center justify-between text-xs bg-slate-50 border border-slate-100 rounded-md px-2 py-1.5">
+                    <span className="text-slate-700">{tech}</span>
+                    <button onClick={() => onRemove(tech)} title="Retirer" className="text-slate-400 hover:text-red-600"><Trash2 size={13} /></button>
+                </li>
+            ))}
+        </ul>
+        <div className="flex gap-2">
+            <input
+                type="text"
+                value={newTechName}
+                onChange={(e) => setNewTechName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') onAdd(); }}
+                placeholder="Prénom NOM"
+                className="flex-1 text-xs border border-slate-200 rounded-md py-1.5 px-2 focus:ring-1 focus:ring-blue-500 outline-none"
+            />
+            <button onClick={onAdd} className="px-2.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"><Plus size={14} /></button>
+        </div>
+        <p className="text-[10px] text-slate-400 mt-2">Le nom doit correspondre au champ Responsable dans Snowflake pour être reconnu.</p>
+    </div>
+);
+
+const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeights, onToast }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [tempWeights, setTempWeights] = useState(DEFAULT_WEIGHTS);
     const isAdmin = userEmail === ADMIN_EMAIL;
@@ -204,14 +291,14 @@ const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeight
             });
     
             if (response.ok) {
-                alert("✅ Config sauvegardée ! (Faites F5 pour vérifier)");
+                onToast?.("Config sauvegardée.", 'success');
             } else {
                 console.warn("Erreur sauvegarde backend.");
-                alert("Erreur de sauvegarde (Vérifiez Console).");
+                onToast?.("Erreur de sauvegarde. Vérifiez la console.", 'error');
             }
         } catch (e) {
             console.error("Erreur save:", e);
-            alert("Erreur de connexion.");
+            onToast?.("Erreur de connexion.", 'error');
         }
     };
 
@@ -321,14 +408,18 @@ const CustomTooltip = ({ active, payload, label }) => {
   return null;
 };
 
-const KPICard = ({ title, value, subtext, icon: Icon, colorClass, active, onClick }) => (
+const KPICard = ({ title, value, subtext, icon: Icon, colorClass, active, onClick, isLoading }) => (
   <div onClick={onClick} className={`px-4 py-3 rounded-lg shadow-sm border transition-all duration-300 flex items-center justify-between ${active ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-100' : 'bg-white border-slate-100'} ${onClick ? 'cursor-pointer hover:bg-slate-50' : ''}`}>
     <div>
       <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{title}</p>
-      <div className="flex items-baseline gap-2">
-        <h3 className="text-xl font-bold text-slate-800">{value}</h3>
-        {subtext && <p className={`text-xs font-medium ${colorClass}`}>{subtext}</p>}
-      </div>
+      {isLoading ? (
+        <Skeleton className="h-6 w-16 mt-1" />
+      ) : (
+        <div className="flex items-baseline gap-2">
+          <h3 className="text-xl font-bold text-slate-800">{value}</h3>
+          {subtext && <p className={`text-xs font-medium ${colorClass}`}>{subtext}</p>}
+        </div>
+      )}
     </div>
     <div className={`p-2 rounded-md ${colorClass.replace('text-', 'bg-').replace('600', '50')}`}><Icon className={`w-5 h-5 ${colorClass}`} /></div>
   </div>
@@ -378,65 +469,160 @@ function MigrationDashboard() {
   const [debugTab, setDebugTab] = useState('calc'); 
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
   const [weightsConfig, setWeightsConfig] = useState(DEFAULT_WEIGHTS);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [isDateScopeOpen, setIsDateScopeOpen] = useState(false);
+  const [dateScopeDraft, setDateScopeDraft] = useState({ start: DEFAULT_WEIGHTS.date_range_start, end: DEFAULT_WEIGHTS.date_range_end });
+  const [isSavingDateScope, setIsSavingDateScope] = useState(false);
+  const [toast, setToast] = useState(null);
+  const [lastSyncTime, setLastSyncTime] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isTeamManagerOpen, setIsTeamManagerOpen] = useState(false);
+  const [newTechName, setNewTechName] = useState('');
+  const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
 
-  const { getToken } = useAuth(); 
+  const { getToken } = useAuth();
+  const isAdmin = userEmail === ADMIN_EMAIL;
+  const isDebugAllowed = isAdmin || (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug') === '1');
+
+  const showToast = useCallback((message, type = 'success') => {
+    setToast({ message, type });
+  }, []);
+
+  // --- CHARGEMENT DES DONNÉES MÉTIER (dépend du scope de dates courant) ---
+  const fetchBusinessData = useCallback(async (dateRange, techsForQuery) => {
+    console.log("📍 Chargement des données métier...", dateRange);
+    setIsLoading(true);
+    try {
+      const token = await getToken();
+      const headers = { Authorization: `Bearer ${token}` };
+      const params = new URLSearchParams({ start: dateRange.start, end: dateRange.end, techs: JSON.stringify(techsForQuery || TECH_LIST_DEFAULT) });
+
+      const response = await fetch(`/api/getData?${params.toString()}`, { headers });
+      const json = await response.json();
+
+      setDebugData(json); // Pour le panneau de debug
+
+      if (!response.ok) throw new Error(json.error || `Erreur API getData`);
+
+      if (json.backoffice) setBackofficeData(json.backoffice || []);
+      if (json.encours) setEncoursData(json.encours || []);
+
+      setLastSyncTime(new Date());
+      console.log("📍 Données métier chargées !");
+    } catch (err) {
+      console.error("❌ ERREUR GLOBALE :", err);
+      setDebugData({ error: err.message });
+      showToast("Erreur de chargement des données. Voir la console.", 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [getToken, showToast]);
 
   // --- LE USE EFFECT BLINDÉ (DEBUG & CHARGEMENT) ---
   useEffect(() => {
-    const fetchData = async () => {
-      console.log("📍 ÉTAPE 1 : Démarrage du chargement des données...");
-      setIsLoading(true);
-      
+    const init = async () => {
+      console.log("📍 ÉTAPE 1 : Démarrage du chargement de la config...");
+
+      let loadedRange = { start: DEFAULT_WEIGHTS.date_range_start, end: DEFAULT_WEIGHTS.date_range_end };
+      let loadedTechList = TECH_LIST_DEFAULT;
+
       try {
-        const token = await getToken();
-        console.log("📍 ÉTAPE 2 : Token récupéré.");
-        
-        const headers = { Authorization: `Bearer ${token}` };
+        const configRes = await fetch(`/api/getConfig?t=${Date.now()}`);
+        if (configRes.ok) {
+            const configJson = await configRes.json();
+            console.log("✅ SUCCÈS - CONFIG REÇUE :", configJson);
 
-        // --- TEST CHARGEMENT CONFIG ---
-        console.log("📍 ÉTAPE 3 : Tentative appel /api/getConfig...");
-        try {
-            const configRes = await fetch(`/api/getConfig?t=${Date.now()}`);
-            console.log(`📍 ÉTAPE 4 : Réponse reçue. Statut HTTP: ${configRes.status}`);
-
-            if (configRes.ok) {
-                const configJson = await configRes.json();
-                console.log("✅ SUCCÈS - CONFIG REÇUE :", configJson);
-                
-                if (configJson && Object.keys(configJson).length > 0) {
-                    setWeightsConfig(prev => ({ ...prev, ...configJson }));
+            if (configJson && Object.keys(configJson).length > 0) {
+                setWeightsConfig(prev => ({ ...prev, ...configJson }));
+                loadedRange = {
+                    start: configJson.date_range_start || loadedRange.start,
+                    end: configJson.date_range_end || loadedRange.end
+                };
+                if (Array.isArray(configJson.tech_list) && configJson.tech_list.length > 0) {
+                    loadedTechList = configJson.tech_list;
+                    setTechList(loadedTechList);
                 }
-            } else {
-                const textError = await configRes.text();
-                console.error("❌ ERREUR API CONFIG (Pas 200 OK) :", configRes.status, textError);
             }
-        } catch (e) {
-            console.error("❌ CRASH APPEL API CONFIG :", e);
+        } else {
+            const textError = await configRes.text();
+            console.error("❌ ERREUR API CONFIG (Pas 200 OK) :", configRes.status, textError);
         }
-
-        // --- CHARGEMENT DONNÉES MÉTIERS ---
-        console.log("📍 ÉTAPE 5 : Appel /api/getData...");
-        const response = await fetch('/api/getData', { headers });
-        const json = await response.json();
-
-        setDebugData(json); // Pour le panneau de debug
-
-        if (!response.ok) throw new Error(json.error || `Erreur API getData`);
-        
-        if (json.backoffice) setBackofficeData(json.backoffice || []); 
-        if (json.encours) setEncoursData(json.encours || []);
-        
-        console.log("📍 ÉTAPE 6 : Tout est chargé !");
-        setIsLoading(false);
-
-      } catch (err) {
-        console.error("❌ ERREUR GLOBALE :", err);
-        setDebugData({ error: err.message });
-        setIsLoading(false);
+      } catch (e) {
+          console.error("❌ CRASH APPEL API CONFIG :", e);
       }
+
+      setDateScopeDraft(loadedRange);
+      await fetchBusinessData(loadedRange, loadedTechList);
     };
-    fetchData();
-  }, [getToken]);
+    init();
+  }, [fetchBusinessData]);
+
+  // --- SCOPE DE DATES : sauvegarde + rechargement des données sur ce nouveau scope ---
+  const handleApplyDateScope = async () => {
+      if (!dateScopeDraft.start || !dateScopeDraft.end || dateScopeDraft.start > dateScopeDraft.end) {
+          showToast("Merci de vérifier les dates (début doit précéder la fin).", 'error');
+          return;
+      }
+      setIsSavingDateScope(true);
+      const updatedConfig = { ...weightsConfig, date_range_start: dateScopeDraft.start, date_range_end: dateScopeDraft.end };
+      try {
+          const response = await fetch('/api/saveConfig', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(updatedConfig)
+          });
+          if (!response.ok) throw new Error("Échec sauvegarde du scope de dates.");
+          setWeightsConfig(updatedConfig);
+          setIsDateScopeOpen(false);
+          setCurrentPage(1);
+          showToast("Scope de dates mis à jour.", 'success');
+          await fetchBusinessData(dateScopeDraft, techList);
+      } catch (e) {
+          console.error("Erreur sauvegarde scope de dates:", e);
+          showToast("Erreur lors de la sauvegarde du scope de dates.", 'error');
+      } finally {
+          setIsSavingDateScope(false);
+      }
+  };
+
+  // --- ÉQUIPE : ajout / suppression d'un technicien, persisté dans la même config partagée ---
+  const persistTechList = async (nextList) => {
+      const updatedConfig = { ...weightsConfig, tech_list: nextList };
+      try {
+          const response = await fetch('/api/saveConfig', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(updatedConfig)
+          });
+          if (!response.ok) throw new Error("Échec sauvegarde équipe.");
+          setWeightsConfig(updatedConfig);
+          setTechList(nextList);
+          showToast("Équipe mise à jour.", 'success');
+      } catch (e) {
+          console.error("Erreur sauvegarde équipe:", e);
+          showToast("Erreur lors de la sauvegarde de l'équipe.", 'error');
+      }
+  };
+
+  const handleAddTech = () => {
+      const name = newTechName.trim();
+      if (!name) return;
+      if (techList.some(t => t.toLowerCase() === name.toLowerCase())) {
+          showToast("Ce technicien est déjà dans la liste.", 'error');
+          return;
+      }
+      persistTechList([...techList, name]);
+      setNewTechName('');
+  };
+
+  const handleRemoveTech = (name) => {
+      if (techList.length <= 1) {
+          showToast("Il doit rester au moins un technicien.", 'error');
+          return;
+      }
+      persistTechList(techList.filter(t => t !== name));
+      if (selectedTech === name) setSelectedTech('Tous');
+  };
   
   const { detailedData, eventsData, planningCount, analysisPipeCount, availableMonths } = useMemo(() => {
     const monthlyStats = new Map();
@@ -658,16 +844,31 @@ function MigrationDashboard() {
   };
   
   const filteredAndSortedEvents = useMemo(() => {
-    let events = eventsData;
+    // On part toujours d'une copie : on ne veut jamais trier/muter le
+    // tableau `eventsData` mémoïsé (partagé avec d'autres calculs comme
+    // techAggregatedData ou weeklyAggregatedData).
+    let events = [...eventsData];
     if (selectedTech !== 'Tous') events = events.filter(e => e.tech === selectedTech);
     if (showPlanning) events = events.filter(e => e.status.includes("A Planifier"));
     else if (selectedMonth) events = events.filter(e => e.date !== "N/A" && e.date.startsWith(selectedMonth));
     else events = events.filter(e => e.date !== "N/A");
+    const q = searchQuery.trim().toLowerCase();
+    if (q) events = events.filter(e => safeString(e.client).toLowerCase().includes(q));
     if (sortConfig.key) {
       events.sort((a, b) => {
         let valA = a[sortConfig.key];
         let valB = b[sortConfig.key];
         if (sortConfig.key === 'date') { if (valA === 'N/A') valA = '0000-00-00'; if (valB === 'N/A') valB = '0000-00-00'; }
+
+        // Comparaison numérique pour la durée (sinon "10" < "9" en tri texte)
+        if (sortConfig.key === 'duration') {
+          const numA = Number(valA) || 0;
+          const numB = Number(valB) || 0;
+          if (numA < numB) return sortConfig.direction === 'asc' ? -1 : 1;
+          if (numA > numB) return sortConfig.direction === 'asc' ? 1 : -1;
+          return 0;
+        }
+
         valA = safeString(valA).toLowerCase();
         valB = safeString(valB).toLowerCase();
         if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
@@ -676,7 +877,19 @@ function MigrationDashboard() {
       });
     }
     return events;
-  }, [selectedTech, selectedMonth, showPlanning, eventsData, sortConfig]);
+  }, [selectedTech, selectedMonth, showPlanning, eventsData, sortConfig, searchQuery]);
+
+  // Réinitialise la pagination du tableau dès que les filtres, le tri ou les
+  // données changent, pour éviter de rester bloqué sur une page vide.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedTech, selectedMonth, showPlanning, sortConfig, eventsData, searchQuery]);
+
+  const totalDetailPages = Math.max(1, Math.ceil(filteredAndSortedEvents.length / DETAIL_TABLE_PAGE_SIZE));
+  const paginatedEvents = useMemo(() => {
+    const start = (currentPage - 1) * DETAIL_TABLE_PAGE_SIZE;
+    return filteredAndSortedEvents.slice(start, start + DETAIL_TABLE_PAGE_SIZE);
+  }, [filteredAndSortedEvents, currentPage]);
 
   const monthlyAggregatedData = useMemo(() => {
     if (detailedData.length === 0) return [];
@@ -782,9 +995,63 @@ function MigrationDashboard() {
       <header className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="bg-blue-100 p-2 rounded-md">{isLoading ? <Loader className="w-5 h-5 text-blue-600 animate-spin" /> : <Activity className="w-5 h-5 text-blue-600" />}</div>
-          <div><h1 className="text-lg font-bold text-slate-800 leading-tight">Pilotage Migrations</h1><p className="text-xs text-slate-500 flex items-center gap-2">{selectedTech === 'Tous' ? "Vue Équipe" : `Focus: ${selectedTech}`}</p></div>
+          <div>
+            <h1 className="text-lg font-bold text-slate-800 leading-tight">Pilotage Migrations</h1>
+            <p className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
+              <span>{selectedTech === 'Tous' ? "Vue Équipe" : `Focus: ${selectedTech}`}</span>
+              <span className="text-slate-300">•</span>
+              <span className="inline-flex items-center gap-1 text-slate-500">
+                <Calendar size={11} />
+                Scope : {weightsConfig.date_range_start ? new Date(weightsConfig.date_range_start).toLocaleDateString('fr-FR') : '—'} → {weightsConfig.date_range_end ? new Date(weightsConfig.date_range_end).toLocaleDateString('fr-FR') : '—'}
+              </span>
+              {lastSyncTime && (
+                <>
+                  <span className="text-slate-300">•</span>
+                  <button
+                    onClick={() => fetchBusinessData({ start: weightsConfig.date_range_start, end: weightsConfig.date_range_end }, techList)}
+                    disabled={isLoading}
+                    className="inline-flex items-center gap-1 text-slate-500 hover:text-blue-600 transition-colors disabled:opacity-50"
+                    title="Recharger les données"
+                  >
+                    <RefreshCw size={11} className={isLoading ? 'animate-spin' : ''} />
+                    Synchro {lastSyncTime.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                  </button>
+                </>
+              )}
+            </p>
+          </div>
         </div>
-        <div className="flex gap-2 items-center">
+
+        {/* --- Barre d'actions desktop --- */}
+        <div className="hidden md:flex gap-2 items-center">
+            {isAdmin && (
+              <div className="relative">
+                <button
+                  onClick={() => { setIsTeamManagerOpen(o => !o); setIsDateScopeOpen(false); }}
+                  className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                  title="Gérer l'équipe"
+                >
+                  <Users size={20} />
+                </button>
+                {isTeamManagerOpen && (
+                  <TeamManagerPanel techList={techList} newTechName={newTechName} setNewTechName={setNewTechName} onAdd={handleAddTech} onRemove={handleRemoveTech} onClose={() => setIsTeamManagerOpen(false)} />
+                )}
+              </div>
+            )}
+            {isAdmin && (
+              <div className="relative">
+                <button
+                  onClick={() => { setDateScopeDraft({ start: weightsConfig.date_range_start, end: weightsConfig.date_range_end }); setIsDateScopeOpen(o => !o); setIsTeamManagerOpen(false); }}
+                  className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                  title="Modifier le scope de dates"
+                >
+                  <Calendar size={20} />
+                </button>
+                {isDateScopeOpen && (
+                  <DateScopePanel dateScopeDraft={dateScopeDraft} setDateScopeDraft={setDateScopeDraft} onApply={handleApplyDateScope} onClose={() => setIsDateScopeOpen(false)} isSaving={isSavingDateScope} />
+                )}
+              </div>
+            )}
             <button onClick={() => setIsRulesModalOpen(true)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Règles de calcul"><Info size={20} /></button>
             <UserButton />
             <div className="relative">
@@ -796,16 +1063,56 @@ function MigrationDashboard() {
             </div>
             {(selectedMonth || showPlanning) && (<button onClick={() => { setSelectedMonth(null); setShowPlanning(false); }} className="flex items-center gap-1 bg-red-50 text-red-600 px-3 py-1.5 rounded-md text-xs font-medium hover:bg-red-100 transition-colors border border-red-100"><X className="w-3 h-3" /> Retour Vue Globale</button>)}
         </div>
+
+        {/* --- Barre d'actions mobile : tout regroupé derrière un bouton "Filtres" --- */}
+        <div className="flex md:hidden items-center gap-2">
+            <button onClick={() => setIsRulesModalOpen(true)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Règles de calcul"><Info size={18} /></button>
+            <UserButton />
+            <button
+              onClick={() => setIsMobileFiltersOpen(o => !o)}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${isMobileFiltersOpen || selectedTech !== 'Tous' ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-slate-50 border-slate-200 text-slate-600'}`}
+            >
+              <SlidersHorizontal size={14} /> Filtres
+            </button>
+        </div>
       </header>
+
+      {isMobileFiltersOpen && (
+        <div className="md:hidden mb-4 bg-white p-4 rounded-lg border border-slate-200 shadow-sm space-y-4 animate-in fade-in slide-in-from-top-2 duration-150">
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Technicien</label>
+            <select value={selectedTech} onChange={(e) => setSelectedTech(e.target.value)} className="w-full pl-3 pr-3 py-2 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
+                <option value="Tous">Tous les techs</option>
+                {techList.map(tech => (<option key={tech} value={tech}>{tech}</option>))}
+            </select>
+          </div>
+          {isAdmin && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Scope de dates</label>
+              <div className="flex items-center gap-2">
+                <input type="date" value={dateScopeDraft.start || ''} onChange={(e) => setDateScopeDraft(d => ({ ...d, start: e.target.value }))} className="flex-1 text-sm border border-slate-200 rounded-md py-2 px-2" />
+                <span className="text-slate-400 text-xs">→</span>
+                <input type="date" value={dateScopeDraft.end || ''} onChange={(e) => setDateScopeDraft(d => ({ ...d, end: e.target.value }))} className="flex-1 text-sm border border-slate-200 rounded-md py-2 px-2" />
+              </div>
+              <button onClick={handleApplyDateScope} disabled={isSavingDateScope} className="mt-2 w-full px-3 py-2 text-xs bg-blue-600 text-white rounded-md font-bold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-1">
+                {isSavingDateScope ? <Loader size={12} className="animate-spin" /> : <Save size={12} />} Appliquer le scope
+              </button>
+            </div>
+          )}
+          {(selectedMonth || showPlanning) && (
+            <button onClick={() => { setSelectedMonth(null); setShowPlanning(false); }} className="w-full flex items-center justify-center gap-1 bg-red-50 text-red-600 px-3 py-2 rounded-md text-xs font-medium hover:bg-red-100 transition-colors border border-red-100"><X className="w-3 h-3" /> Retour Vue Globale</button>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <div onClick={() => { setShowPlanning(!showPlanning); setSelectedMonth(null); }} className={`px-4 py-3 rounded-lg shadow-sm border flex flex-col justify-center cursor-pointer transition-all duration-200 gap-3 ${showPlanning ? 'bg-indigo-50 border-indigo-200 ring-2 ring-indigo-100' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
             <PipeProgress label="Prêt pour Mise en Place" count={planningCount} colorClass="text-indigo-600" barColor="bg-indigo-500" />
             <PipeProgress label="Prêt pour Analyse" count={analysisPipeCount} colorClass="text-cyan-600" barColor="bg-cyan-500" />
         </div>
-        <KPICard title="Besoin Total (h)" value={kpiStats.besoin.toFixed(0)} subtext={selectedMonth ? "Sur le mois" : "Annuel"} icon={Users} colorClass={COLORS.text_besoin} active={!!selectedMonth}/>
-        <KPICard title="Capacité (h)" value={kpiStats.capacite.toFixed(0)} subtext="Planifiée" icon={Clock} colorClass={COLORS.text_capacite} active={!!selectedMonth}/>
-        <KPICard title="Taux Couverture" value={`${kpiStats.ratio.toFixed(0)}%`} subtext="Capa. / Besoin" icon={TrendingUp} colorClass={kpiStats.ratio >= 100 ? COLORS.text_ok : COLORS.text_danger} active={!!selectedMonth}/>
+        <KPICard title="Besoin Total (h)" value={kpiStats.besoin.toFixed(0)} subtext={selectedMonth ? "Sur le mois" : "Annuel"} icon={Users} colorClass={COLORS.text_besoin} active={!!selectedMonth} isLoading={isLoading}/>
+        <KPICard title="Capacité (h)" value={kpiStats.capacite.toFixed(0)} subtext="Planifiée" icon={Clock} colorClass={COLORS.text_capacite} active={!!selectedMonth} isLoading={isLoading}/>
+        <KPICard title="Taux Couverture" value={`${kpiStats.ratio.toFixed(0)}%`} subtext="Capa. / Besoin" icon={TrendingUp} colorClass={kpiStats.ratio >= 100 ? COLORS.text_ok : COLORS.text_danger} active={!!selectedMonth} isLoading={isLoading}/>
       </div>
 
       <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 mb-4">
@@ -827,6 +1134,15 @@ function MigrationDashboard() {
             </div>
         </div>
         <div className="h-64 w-full cursor-pointer">
+          {isLoading ? (
+            <div className="h-full w-full flex items-end gap-2 px-2 pb-1">
+              {[40, 65, 50, 80, 35, 60, 45, 70, 55, 30, 75, 48].map((h, i) => (
+                <div key={i} className="flex-1 h-full flex items-end">
+                  <Skeleton className="w-full" style={{ height: `${h}%` }} />
+                </div>
+              ))}
+            </div>
+          ) : (
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={mainChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }} onClick={handleChartClick}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
@@ -838,6 +1154,7 @@ function MigrationDashboard() {
               <Bar stackId="b" dataKey="capacite" fill={COLORS.capacite} radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16} />
             </ComposedChart>
           </ResponsiveContainer>
+          )}
         </div>
         {!selectedMonth && <p className="text-[10px] text-center text-slate-400 italic mt-1">Cliquez sur un mois pour voir le détail par semaine</p>}
       </div>
@@ -847,6 +1164,25 @@ function MigrationDashboard() {
           <div className="flex items-center gap-2"><FileText className="w-4 h-4 text-slate-400" /><h2 className="text-sm font-bold text-slate-800">Détail des Opérations {selectedTech !== 'Tous' ? `: ${selectedTech}` : "(Tous)"}</h2><span className="ml-2 text-xs font-normal text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">{filteredAndSortedEvents.length} entrées</span></div>
           {isDetailListExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
         </button>
+        {isDetailListExpanded && (
+          <div className="px-4 py-2 border-b border-slate-100 bg-white">
+            <div className="relative max-w-xs">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Rechercher un client / dossier..."
+                className="w-full pl-8 pr-8 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {isDetailListExpanded && (
           <div className="overflow-x-auto max-h-96">
             <table className="w-full text-xs text-left text-slate-600">
@@ -861,27 +1197,66 @@ function MigrationDashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredAndSortedEvents.map((event, index) => (
-                  <tr 
-                      key={index} 
-                      className={`transition-colors ${
-                          event.ageWarning === 'red' ? 'bg-red-100 hover:bg-red-200' : 
-                          event.ageWarning === 'orange' ? 'bg-orange-100 hover:bg-orange-200' : 
-                          'hover:bg-slate-50'
-                      }`}
-                      title={event.creeLeFormatted && event.creeLeFormatted !== "N/A" ? `Créé le : ${event.creeLeFormatted}` : ""}
-                  >
-                    <td className="px-2 py-1 font-medium text-slate-800 whitespace-nowrap">{event.date === "N/A" ? "En attente" : new Date(event.date).toLocaleDateString('fr-FR')}</td>
-                    <td className="px-2 py-1 whitespace-nowrap truncate max-w-[150px]">{event.tech}</td>
-                    <td className="px-2 py-1 font-medium text-slate-700 whitespace-nowrap truncate max-w-[200px]">{event.client}</td>
-                    <td className="px-2 py-1 text-slate-500 whitespace-nowrap">{event.type}</td>
-                    <td className="px-2 py-1 text-right font-medium whitespace-nowrap">{event.duration > 0 ? event.duration.toFixed(2) : '-'}</td>
-                    <td className="px-2 py-1 text-center whitespace-nowrap"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${getStatusBadgeColor(event.color)}`}>{event.status}</span></td>
-                  </tr>
-                ))}
-                {filteredAndSortedEvents.length === 0 && (<tr><td colSpan="6" className="px-4 py-8 text-center text-slate-400 italic">Aucun événement trouvé.</td></tr>)}
+                {isLoading ? (
+                  Array.from({ length: 8 }).map((_, i) => (
+                    <tr key={`skeleton-${i}`}>
+                      <td className="px-2 py-2"><Skeleton className="h-3 w-16" /></td>
+                      <td className="px-2 py-2"><Skeleton className="h-3 w-24" /></td>
+                      <td className="px-2 py-2"><Skeleton className="h-3 w-28" /></td>
+                      <td className="px-2 py-2"><Skeleton className="h-3 w-20" /></td>
+                      <td className="px-2 py-2"><Skeleton className="h-3 w-10 ml-auto" /></td>
+                      <td className="px-2 py-2"><Skeleton className="h-3 w-14 mx-auto" /></td>
+                    </tr>
+                  ))
+                ) : (
+                  <>
+                    {paginatedEvents.map((event, index) => (
+                      <tr 
+                          key={index} 
+                          className={`transition-colors ${
+                              event.ageWarning === 'red' ? 'bg-red-100 hover:bg-red-200' : 
+                              event.ageWarning === 'orange' ? 'bg-orange-100 hover:bg-orange-200' : 
+                              'hover:bg-slate-50'
+                          }`}
+                          title={event.creeLeFormatted && event.creeLeFormatted !== "N/A" ? `Créé le : ${event.creeLeFormatted}` : ""}
+                      >
+                        <td className="px-2 py-1 font-medium text-slate-800 whitespace-nowrap">{event.date === "N/A" ? "En attente" : new Date(event.date).toLocaleDateString('fr-FR')}</td>
+                        <td className="px-2 py-1 whitespace-nowrap truncate max-w-[150px]">{event.tech}</td>
+                        <td className="px-2 py-1 font-medium text-slate-700 whitespace-nowrap truncate max-w-[200px]">{event.client}</td>
+                        <td className="px-2 py-1 text-slate-500 whitespace-nowrap">{event.type}</td>
+                        <td className="px-2 py-1 text-right font-medium whitespace-nowrap">{event.duration > 0 ? event.duration.toFixed(2) : '-'}</td>
+                        <td className="px-2 py-1 text-center whitespace-nowrap"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${getStatusBadgeColor(event.color)}`}>{event.status}</span></td>
+                      </tr>
+                    ))}
+                    {filteredAndSortedEvents.length === 0 && (<tr><td colSpan="6" className="px-4 py-8 text-center text-slate-400 italic">Aucun événement trouvé.</td></tr>)}
+                  </>
+                )}
               </tbody>
             </table>
+          </div>
+        )}
+        {isDetailListExpanded && !isLoading && filteredAndSortedEvents.length > 0 && (
+          <div className="flex items-center justify-between px-4 py-2 border-t border-slate-100 bg-slate-50/50 text-xs text-slate-500">
+            <span>
+              {(currentPage - 1) * DETAIL_TABLE_PAGE_SIZE + 1}–{Math.min(currentPage * DETAIL_TABLE_PAGE_SIZE, filteredAndSortedEvents.length)} sur {filteredAndSortedEvents.length}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="px-2 py-1 rounded border border-slate-200 bg-white font-medium hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Précédent
+              </button>
+              <span className="font-medium text-slate-600">Page {currentPage} / {totalDetailPages}</span>
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalDetailPages, p + 1))}
+                disabled={currentPage === totalDetailPages}
+                className="px-2 py-1 rounded border border-slate-200 bg-white font-medium hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Suivant
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -950,8 +1325,12 @@ function MigrationDashboard() {
         userEmail={userEmail} 
         currentWeights={weightsConfig}
         onUpdateWeights={setWeightsConfig}
+        onToast={showToast}
       />
 
+      <Toast toast={toast} onClose={() => setToast(null)} />
+
+      {isDebugAllowed && (
       <div className={`fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out ${isDebugOpen ? 'translate-y-0' : 'translate-y-[calc(100%-40px)]'}`}>
         <div className="bg-slate-900 border-t border-slate-700 shadow-2xl flex flex-col h-64">
             <div className="w-full h-10 bg-slate-800 flex items-center justify-between px-4 border-b border-slate-700">
@@ -972,6 +1351,7 @@ function MigrationDashboard() {
             </div>
         </div>
       </div>
+      )}
     </div>
   );
 }
