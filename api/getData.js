@@ -1,6 +1,11 @@
 import { verifyToken } from '@clerk/backend';
 const { createSnowflakeConnection } = require('./_snowflake');
 
+// Bornes de dates par défaut, utilisées si le front n'en envoie pas
+// (doivent rester cohérentes avec DEFAULT_WEIGHTS.date_range_start/end côté App.js).
+const DEFAULT_DATE_START = '2025-10-01';
+const DEFAULT_DATE_END = '2026-03-01';
+
 // Liste de secours si le front n'envoie rien ou envoie une valeur invalide.
 const DEFAULT_TECH_LAST_NAMES = ['AYAT', 'MESSIN', 'GROSSI', 'SAUROIS', 'GAMONDES'];
 
@@ -94,6 +99,7 @@ export default async function handler(request, response) {
                 LIBELLE, 
                 EVENEMENT, 
                 NUMDOSSIER, 
+                OFFER_ID,
                 "USER" as NB_USERS -- Alias pour compatibilité frontend
             FROM V_EVENEMENT_TECHNIQUE
             WHERE DATE >= ? AND DATE <= ?
@@ -126,14 +132,40 @@ export default async function handler(request, response) {
             ${filtreTechs}
         `;
 
+        // --- REQUÊTE 3 : FORMATIONS (V_EVENEMENT, pas V_EVENEMENT_TECHNIQUE) ---
+        // Les événements de formation (ex. ADAPPS) ne sont pas dans la vue
+        // technique, mais dans la vue générale V_EVENEMENT, sur un
+        // TYPE_EVENEMENT différent. On les rapproche des migrations côté
+        // front via OFFER_ID (pas de filtre technicien : la formation peut
+        // être animée par quelqu'un d'autre que le technicien de migration).
+        // Fenêtre élargie de 90 jours après la fin du scope pour capter les
+        // formations planifiées après la mise en place.
+        const formationRangeEndDate = new Date(`${rangeEnd}T00:00:00Z`);
+        formationRangeEndDate.setUTCDate(formationRangeEndDate.getUTCDate() + 90);
+        const formationRangeEnd = formationRangeEndDate.toISOString().split('T')[0];
+
+        const sqlFormations = `
+            SELECT 
+                DATE,
+                EVENEMENT,
+                OFFER_ID,
+                NUMDOSSIER
+            FROM V_EVENEMENT
+            WHERE TYPE_EVENEMENT = 'Formation'
+              AND OFFER_ID IS NOT NULL
+              AND DATE >= ? AND DATE <= ?
+        `;
+
         console.log(`Exécution requêtes filtrées [${rangeStart} → ${rangeEnd}], techs: ${techLastNames.join(', ')}...`);
         const backofficeRows = await runQuery(conn, sqlBackoffice, [rangeStart, rangeEnd, ...techBinds]);
         const encoursRows = await runQuery(conn, sqlEncours, [rangeStart, rangeEnd, ...techBinds]);
+        const formationRows = await runQuery(conn, sqlFormations, [rangeStart, formationRangeEnd]);
 
         response.status(200).json({
             message: "Données filtrées récupérées ✅",
             backoffice: backofficeRows,
             encours: encoursRows,
+            formations: formationRows,
             dateRange: { start: rangeStart, end: rangeEnd }
         });
 
