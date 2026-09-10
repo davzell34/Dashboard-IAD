@@ -6,7 +6,7 @@ import {
 import { 
   Activity, Users, Clock, TrendingUp, AlertTriangle, CheckCircle, 
   Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Loader,
-  ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout, Search, Layers, Server, FileSearch, Terminal,
+  ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout, Search, Layers, Server, FileSearch,
   Calculator, Database, BookOpen, Settings, Save, RotateCcw, Plus, Trash2, SlidersHorizontal, RefreshCw,
   CheckCircle2, AlertCircle, Phone, Copy, Send, PauseCircle, GraduationCap, CalendarClock, Wrench
 } from 'lucide-react';
@@ -42,6 +42,37 @@ const DEFAULT_WEIGHTS = {
 };
 
 const DETAIL_TABLE_PAGE_SIZE = 25;
+
+// --- CACHE LOCAL (sessionStorage) ---
+// Évite de re-taper Snowflake à chaque fois qu'on navigue dans l'interface
+// (changement de filtre, de tech, retour sur l'onglet, F5...). Portée à
+// l'onglet du navigateur (vidé à sa fermeture) pour ne jamais servir de
+// données obsolètes d'une session à l'autre au-delà de la durée de vie fixée.
+const CACHE_PREFIX = 'pilotageMigrations:';
+const DATA_CACHE_TTL_MS = 3 * 60 * 1000;   // 3 min : données métier (tickets/événements)
+const CONFIG_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min : config (poids, scope, équipe)
+
+const readCache = (key) => {
+    try {
+        if (typeof window === 'undefined') return null;
+        const raw = window.sessionStorage.getItem(CACHE_PREFIX + key);
+        if (!raw) return null;
+        const { value, expiresAt } = JSON.parse(raw);
+        if (Date.now() > expiresAt) { window.sessionStorage.removeItem(CACHE_PREFIX + key); return null; }
+        return value;
+    } catch (e) {
+        return null; // stockage indisponible (navigation privée, quota...) : on continue sans cache
+    }
+};
+
+const writeCache = (key, value, ttlMs) => {
+    try {
+        if (typeof window === 'undefined') return;
+        window.sessionStorage.setItem(CACHE_PREFIX + key, JSON.stringify({ value, expiresAt: Date.now() + ttlMs }));
+    } catch (e) {
+        // quota dépassé ou stockage indisponible : on continue sans cache, rien de bloquant
+    }
+};
 
 const COLORS = {
     besoin: "#60a5fa", encours: "#fb923c", capacite: "#34d399",
@@ -374,7 +405,9 @@ const MigrationRow = ({ migration, isExpanded, onToggle }) => {
                     </div>
                 </div>
                 <div className="flex-1 min-w-0">
-                    <MigrationTimelineMini currentIndex={migration.stageIndex} alea={migration.alea} casParticulier={migration.casParticulier} compact />
+                    {!isExpanded && (
+                        <MigrationTimelineMini currentIndex={migration.stageIndex} alea={migration.alea} casParticulier={migration.casParticulier} compact />
+                    )}
                 </div>
                 {migration.alea && (
                     <span className="hidden sm:inline shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase bg-amber-50 text-amber-700 border border-amber-100">{migration.alea}</span>
@@ -595,9 +628,6 @@ function MigrationDashboard() {
   const [isTableExpanded, setIsTableExpanded] = useState(false); 
   const [isTechChartExpanded, setIsTechChartExpanded] = useState(false); 
   const [isRulesModalOpen, setIsRulesModalOpen] = useState(false);
-  const [debugData, setDebugData] = useState(null);
-  const [isDebugOpen, setIsDebugOpen] = useState(false);
-  const [debugTab, setDebugTab] = useState('calc'); 
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
   const [weightsConfig, setWeightsConfig] = useState(DEFAULT_WEIGHTS);
   const [currentPage, setCurrentPage] = useState(1);
@@ -614,7 +644,6 @@ function MigrationDashboard() {
 
   const { getToken } = useAuth();
   const isAdmin = userEmail === ADMIN_EMAIL;
-  const isDebugAllowed = isAdmin || (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug') === '1');
   const currentTechName = normalizeTechName(user?.fullName, techList);
   const [viewAsTech, setViewAsTech] = useState(null);
   const [expandedDossier, setExpandedDossier] = useState(null);
@@ -625,18 +654,32 @@ function MigrationDashboard() {
   }, []);
 
   // --- CHARGEMENT DES DONNÉES MÉTIER (dépend du scope de dates courant) ---
-  const fetchBusinessData = useCallback(async (dateRange, techsForQuery) => {
+  const fetchBusinessData = useCallback(async (dateRange, techsForQuery, options = {}) => {
+    const { forceRefresh = false } = options;
+    const techsList = techsForQuery || TECH_LIST_DEFAULT;
+    const cacheKey = `data:${dateRange.start}:${dateRange.end}:${JSON.stringify(techsList)}`;
+
+    if (!forceRefresh) {
+      const cached = readCache(cacheKey);
+      if (cached) {
+        setBackofficeData(cached.backoffice || []);
+        setEncoursData(cached.encours || []);
+        setSpecialEventsData(cached.specialEvents || []);
+        setLastSyncTime(new Date(cached.cachedAt));
+        console.log("📍 Données métier chargées depuis le cache local.");
+        return;
+      }
+    }
+
     console.log("📍 Chargement des données métier...", dateRange);
     setIsLoading(true);
     try {
       const token = await getToken();
       const headers = { Authorization: `Bearer ${token}` };
-      const params = new URLSearchParams({ start: dateRange.start, end: dateRange.end, techs: JSON.stringify(techsForQuery || TECH_LIST_DEFAULT) });
+      const params = new URLSearchParams({ start: dateRange.start, end: dateRange.end, techs: JSON.stringify(techsList) });
 
       const response = await fetch(`/api/getData?${params.toString()}`, { headers });
       const json = await response.json();
-
-      setDebugData(json); // Pour le panneau de debug
 
       if (!response.ok) throw new Error(json.error || `Erreur API getData`);
 
@@ -644,11 +687,13 @@ function MigrationDashboard() {
       if (json.encours) setEncoursData(json.encours || []);
       if (json.specialEvents) setSpecialEventsData(json.specialEvents || []);
 
-      setLastSyncTime(new Date());
+      const cachedAt = Date.now();
+      writeCache(cacheKey, { backoffice: json.backoffice, encours: json.encours, specialEvents: json.specialEvents, cachedAt }, DATA_CACHE_TTL_MS);
+
+      setLastSyncTime(new Date(cachedAt));
       console.log("📍 Données métier chargées !");
     } catch (err) {
       console.error("❌ ERREUR GLOBALE :", err);
-      setDebugData({ error: err.message });
       showToast("Erreur de chargement des données. Voir la console.", 'error');
     } finally {
       setIsLoading(false);
@@ -663,29 +708,40 @@ function MigrationDashboard() {
       let loadedRange = { start: DEFAULT_WEIGHTS.date_range_start, end: DEFAULT_WEIGHTS.date_range_end };
       let loadedTechList = TECH_LIST_DEFAULT;
 
-      try {
-        const configRes = await fetch(`/api/getConfig?t=${Date.now()}`);
-        if (configRes.ok) {
-            const configJson = await configRes.json();
-            console.log("✅ SUCCÈS - CONFIG REÇUE :", configJson);
+      const applyConfig = (configJson) => {
+          if (!configJson || Object.keys(configJson).length === 0) return;
+          setWeightsConfig(prev => ({ ...prev, ...configJson }));
+          loadedRange = {
+              start: configJson.date_range_start || loadedRange.start,
+              end: configJson.date_range_end || loadedRange.end
+          };
+          if (Array.isArray(configJson.tech_list) && configJson.tech_list.length > 0) {
+              loadedTechList = configJson.tech_list;
+              setTechList(loadedTechList);
+          }
+      };
 
-            if (configJson && Object.keys(configJson).length > 0) {
-                setWeightsConfig(prev => ({ ...prev, ...configJson }));
-                loadedRange = {
-                    start: configJson.date_range_start || loadedRange.start,
-                    end: configJson.date_range_end || loadedRange.end
-                };
-                if (Array.isArray(configJson.tech_list) && configJson.tech_list.length > 0) {
-                    loadedTechList = configJson.tech_list;
-                    setTechList(loadedTechList);
-                }
-            }
-        } else {
-            const textError = await configRes.text();
-            console.error("❌ ERREUR API CONFIG (Pas 200 OK) :", configRes.status, textError);
+      const cachedConfig = readCache('config');
+      if (cachedConfig) {
+          console.log("📍 Config chargée depuis le cache local.");
+          applyConfig(cachedConfig);
+      } else {
+        try {
+          const configRes = await fetch(`/api/getConfig?t=${Date.now()}`);
+          if (configRes.ok) {
+              const configJson = await configRes.json();
+              console.log("✅ SUCCÈS - CONFIG REÇUE :", configJson);
+              applyConfig(configJson);
+              if (configJson && Object.keys(configJson).length > 0) {
+                  writeCache('config', configJson, CONFIG_CACHE_TTL_MS);
+              }
+          } else {
+              const textError = await configRes.text();
+              console.error("❌ ERREUR API CONFIG (Pas 200 OK) :", configRes.status, textError);
+          }
+        } catch (e) {
+            console.error("❌ CRASH APPEL API CONFIG :", e);
         }
-      } catch (e) {
-          console.error("❌ CRASH APPEL API CONFIG :", e);
       }
 
       setDateScopeDraft(loadedRange);
@@ -710,10 +766,11 @@ function MigrationDashboard() {
           });
           if (!response.ok) throw new Error("Échec sauvegarde du scope de dates.");
           setWeightsConfig(updatedConfig);
+          writeCache('config', updatedConfig, CONFIG_CACHE_TTL_MS);
           setIsDateScopeOpen(false);
           setCurrentPage(1);
           showToast("Scope de dates mis à jour.", 'success');
-          await fetchBusinessData(dateScopeDraft, techList);
+          await fetchBusinessData(dateScopeDraft, techList, { forceRefresh: true });
       } catch (e) {
           console.error("Erreur sauvegarde scope de dates:", e);
           showToast("Erreur lors de la sauvegarde du scope de dates.", 'error');
@@ -733,8 +790,13 @@ function MigrationDashboard() {
           });
           if (!response.ok) throw new Error("Échec sauvegarde équipe.");
           setWeightsConfig(updatedConfig);
+          writeCache('config', updatedConfig, CONFIG_CACHE_TTL_MS);
           setTechList(nextList);
           showToast("Équipe mise à jour.", 'success');
+          // La liste d'équipe pilote aussi le filtre technicien côté Snowflake
+          // (getData.js) : sans ce rechargement, un technicien nouvellement
+          // ajouté n'aurait aucune donnée tant que la page n'est pas rechargée.
+          await fetchBusinessData({ start: updatedConfig.date_range_start, end: updatedConfig.date_range_end }, nextList, { forceRefresh: true });
       } catch (e) {
           console.error("Erreur sauvegarde équipe:", e);
           showToast("Erreur lors de la sauvegarde de l'équipe.", 'error');
@@ -1234,7 +1296,7 @@ function MigrationDashboard() {
                 <>
                   <span className="text-slate-300">•</span>
                   <button
-                    onClick={() => fetchBusinessData({ start: weightsConfig.date_range_start, end: weightsConfig.date_range_end }, techList)}
+                    onClick={() => fetchBusinessData({ start: weightsConfig.date_range_start, end: weightsConfig.date_range_end }, techList, { forceRefresh: true })}
                     disabled={isLoading}
                     className="inline-flex items-center gap-1 text-slate-500 hover:text-blue-600 transition-colors disabled:opacity-50"
                     title="Recharger les données"
@@ -1614,34 +1676,11 @@ function MigrationDashboard() {
         onClose={() => setIsRulesModalOpen(false)} 
         userEmail={userEmail} 
         currentWeights={weightsConfig}
-        onUpdateWeights={setWeightsConfig}
+        onUpdateWeights={(newConfig) => { setWeightsConfig(newConfig); writeCache('config', newConfig, CONFIG_CACHE_TTL_MS); }}
         onToast={showToast}
       />
 
       <Toast toast={toast} onClose={() => setToast(null)} />
-
-      {isDebugAllowed && (
-      <div className={`fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out ${isDebugOpen ? 'translate-y-0' : 'translate-y-[calc(100%-40px)]'}`}>
-        <div className="bg-slate-900 border-t border-slate-700 shadow-2xl flex flex-col h-64">
-            <div className="w-full h-10 bg-slate-800 flex items-center justify-between px-4 border-b border-slate-700">
-                <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2 cursor-pointer text-white text-xs font-mono" onClick={() => setIsDebugOpen(!isDebugOpen)}><Terminal size={14} className="text-green-400" /><span>CONSOLE DEBUG</span></div>
-                    <div className="flex bg-slate-950 rounded p-0.5">
-                        <button onClick={() => setDebugTab('raw')} className={`px-3 py-1 text-[10px] rounded transition-colors ${debugTab === 'raw' ? 'bg-slate-700 text-white font-bold' : 'text-slate-400 hover:text-slate-200'}`}>Données Brutes</button>
-                        <button onClick={() => setDebugTab('calc')} className={`px-3 py-1 text-[10px] rounded transition-colors ${debugTab === 'calc' ? 'bg-blue-900 text-blue-100 font-bold' : 'text-slate-400 hover:text-slate-200'}`}>Audit : Besoin (Nouv)</button>
-                    </div>
-                </div>
-                <div className="flex items-center gap-2">
-                    {debugData && (<span className={`px-2 py-0.5 rounded text-[10px] ${debugData.error ? 'bg-red-900 text-red-300' : 'bg-green-900 text-green-300'}`}>{debugData.error ? 'ERREUR API' : 'DONNÉES REÇUES'}</span>)}
-                    <button onClick={() => setIsDebugOpen(!isDebugOpen)} className="text-slate-400 hover:text-white">{isDebugOpen ? <ChevronDown size={14} /> : <ChevronUp size={14} />}</button>
-                </div>
-            </div>
-            <div className="flex-1 overflow-auto p-4 font-mono text-xs bg-slate-950">
-                {debugTab === 'raw' ? (<div className="text-green-400">{debugData ? (<pre>{JSON.stringify(debugData, null, 2)}</pre>) : (<div className="flex items-center gap-2 text-slate-500"><Activity size={14} className="animate-spin" /> Chargement des données...</div>)}</div>) : (<div className="text-blue-200">Log console</div>)}
-            </div>
-        </div>
-      </div>
-      )}
     </div>
   );
 }
