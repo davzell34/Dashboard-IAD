@@ -124,6 +124,7 @@ export default async function handler(request, response) {
                 DERNIERE_ACTION,
                 REPORTE_LE,
                 NUMERO_DOSSIER,
+                NUMERO_INCIDENT,
                 CATEGORIE,
                 INTERLOCUTEUR
             FROM V_TICKETS_SERVICE_TECHNIQUE
@@ -165,11 +166,44 @@ export default async function handler(request, response) {
         const encoursRows = await runQuery(conn, sqlEncours, [rangeStart, rangeEnd, ...techBinds]);
         const specialEventRows = await runQuery(conn, sqlSpecialEvents, [rangeStart, formationRangeEnd]);
 
+        // --- REQUÊTE 4 : NOTES DES TICKETS "[IAD] - Préparation Avocatmail" ---
+        // Les notes vivent dans V_TICKET (colonne TIC_KPI_NOTES, un tableau
+        // JSON imbriqué) et pas dans V_TICKETS_SERVICE_TECHNIQUE. On ne va
+        // chercher les notes QUE pour les tickets IAD déjà identifiés dans
+        // encoursRows (via NUMERO_INCIDENT), pour ne pas alourdir la requête
+        // avec des notes de tickets qui ne nous intéressent pas ici.
+        // LATERAL FLATTEN + GROUP BY (pas de sous-requête corrélée LISTAGG,
+        // qui avait fait planter Snowflake par le passé sur ce même besoin).
+        const iadIncidentIds = [...new Set(
+            encoursRows
+                .filter(r => String(r.MOTIF || '').startsWith('[IAD] - Préparation Avocatmail'))
+                .map(r => r.NUMERO_INCIDENT)
+                .filter(Boolean)
+        )];
+
+        let ticketNotesRows = [];
+        if (iadIncidentIds.length > 0) {
+            const sqlNotes = `
+                SELECT 
+                    t.TICKET_ID,
+                    LISTAGG(
+                        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+                            REGEXP_REPLACE(n.value:"Contenu Note"::string, '<[^>]+>', '')
+                        , '&eacute;','é'), '&egrave;','è'), '&agrave;','à'), '&ecirc;','ê'), '&ccedil;','ç'), '&ocirc;','ô'), '&ugrave;','ù'), '&nbsp;',' '), '&amp;','&'), '&gt;','>')
+                    , '\n---\n') WITHIN GROUP (ORDER BY n.index) AS notes_clean
+                FROM SEPTEO_SHARE.POLE_AVOCAT.V_TICKET t, LATERAL FLATTEN(input => t.TIC_KPI_NOTES, outer => TRUE) n
+                WHERE t.TICKET_ID IN (${iadIncidentIds.map(() => '?').join(',')})
+                GROUP BY t.TICKET_ID
+            `;
+            ticketNotesRows = await runQuery(conn, sqlNotes, iadIncidentIds);
+        }
+
         response.status(200).json({
             message: "Données filtrées récupérées ✅",
             backoffice: backofficeRows,
             encours: encoursRows,
             specialEvents: specialEventRows,
+            ticketNotes: ticketNotesRows,
             dateRange: { start: rangeStart, end: rangeEnd }
         });
 
