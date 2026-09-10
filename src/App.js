@@ -583,6 +583,7 @@ function MigrationDashboard() {
 
   const [backofficeData, setBackofficeData] = useState([]);
   const [encoursData, setEncoursData] = useState([]);
+  const [formationsData, setFormationsData] = useState([]);
   const [techList, setTechList] = useState(TECH_LIST_DEFAULT);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTech, setSelectedTech] = useState('Tous');
@@ -639,6 +640,7 @@ function MigrationDashboard() {
 
       if (json.backoffice) setBackofficeData(json.backoffice || []);
       if (json.encours) setEncoursData(json.encours || []);
+      if (json.formations) setFormationsData(json.formations || []);
 
       setLastSyncTime(new Date());
       console.log("📍 Données métier chargées !");
@@ -1144,16 +1146,13 @@ function MigrationDashboard() {
       const linkedEvents = (backofficeData || []).filter(e => safeString(e.NUMDOSSIER) === dossier.numDossier);
       const analysisEvent = linkedEvents.find(e => ANALYSIS_EVENT_NAMES.includes(safeString(e.EVENEMENT)));
       // Le reste des événements du dossier, triés chronologiquement : le
-      // premier est supposé être la livraison (MX / mise en place), tout
-      // événement suivant est traité comme "cas particulier" (formation
-      // ADAPPS ou autre intervention déjà prévue).
+      // premier est supposé être la livraison (MX / mise en place).
       const otherEventsSorted = linkedEvents
         .filter(e => e !== analysisEvent)
         .map(e => ({ ...e, _date: parseDateSafe(e.DATE) }))
         .filter(e => e._date)
         .sort((a, b) => a._date - b._date);
       const livraisonEvent = otherEventsSorted[0] || null;
-      const casParticulierEvent = otherEventsSorted[1] || null;
       const stage = getMigrationStage(dossier.categorie, dossier.motif);
       // Heuristique : si "Prêt pour mise en place" ET qu'un événement de
       // planification (hors analyse) existe déjà pour ce dossier, on
@@ -1161,6 +1160,24 @@ function MigrationDashboard() {
       // d'événement de finalisation si disponible.
       const stageIndex = (stage.index === 4 && livraisonEvent && !stage.alea) ? 5 : stage.index;
       const clientName = dossier.interlocuteur || safeString(linkedEvents[0]?.DOSSIER) || `Dossier ${dossier.numDossier}`;
+
+      // "Cas particulier" : première formation (V_EVENEMENT, TYPE_EVENEMENT =
+      // "Formation") rattachée au même OFFER_ID que la livraison, postérieure
+      // à celle-ci. On ne se fie plus à l'ordre chronologique brut des
+      // événements du dossier (trop de bruit : paiements, appels, échéances
+      // de contrat sans rapport avec la migration elle-même).
+      const offerId = safeString(livraisonEvent?.OFFER_ID || analysisEvent?.OFFER_ID || '');
+      let casParticulier = null;
+      if (offerId) {
+        const afterDate = livraisonEvent?._date || parseDateSafe(analysisEvent?.DATE);
+        const matches = (formationsData || [])
+          .filter(f => safeString(f.OFFER_ID) === offerId)
+          .map(f => ({ ...f, _date: parseDateSafe(f.DATE) }))
+          .filter(f => f._date && (!afterDate || f._date > afterDate))
+          .sort((a, b) => a._date - b._date);
+        if (matches[0]) casParticulier = { label: safeString(matches[0].EVENEMENT || 'Formation'), date: matches[0]._date };
+      }
+
       return {
         ...dossier,
         clientName,
@@ -1168,10 +1185,10 @@ function MigrationDashboard() {
         alea: stage.alea,
         analysisDate: parseDateSafe(analysisEvent?.DATE),
         livraisonDate: livraisonEvent?._date || null,
-        casParticulier: casParticulierEvent ? { label: safeString(casParticulierEvent.EVENEMENT || casParticulierEvent.LIBELLE || 'Événement particulier'), date: casParticulierEvent._date } : null
+        casParticulier
       };
     }).sort((a, b) => (a.stageIndex || 0) - (b.stageIndex || 0));
-  }, [encoursData, backofficeData, effectiveTechName, techList]);
+  }, [encoursData, backofficeData, formationsData, effectiveTechName, techList]);
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500 relative">
