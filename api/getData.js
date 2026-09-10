@@ -152,7 +152,8 @@ export default async function handler(request, response) {
                 EVENEMENT,
                 OFFER_ID,
                 NUMDOSSIER,
-                TYPE_EVENEMENT
+                TYPE_EVENEMENT,
+                RESPONSABLE
             FROM V_EVENEMENT
             WHERE DATE >= ? AND DATE <= ?
               AND (
