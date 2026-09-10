@@ -8,7 +8,7 @@ import {
   Calendar, BarChart2, Filter, Info, X, Table as TableIcon, ChevronDown, ChevronUp, FileText, Briefcase, Loader,
   ArrowUpDown, ArrowUp, ArrowDown, CornerDownRight, Layout, Search, Layers, Server, FileSearch, Terminal,
   Calculator, Database, BookOpen, Settings, Save, RotateCcw, Plus, Trash2, SlidersHorizontal, RefreshCw,
-  CheckCircle2, AlertCircle
+  CheckCircle2, AlertCircle, Phone, Copy, Send, PauseCircle, GraduationCap, CalendarClock
 } from 'lucide-react';
 import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, UserButton, useUser, useAuth } from "@clerk/clerk-react";
 
@@ -194,7 +194,29 @@ const getRemainingLoad = (categorie, motif, weights) => {
 // de calcul principal, réutilisés ici pour repérer l'événement de kickoff
 // (analyse) d'un dossier.
 const ANALYSIS_EVENT_NAMES = ['Avocatmail - Analyse', 'Migration messagerie Adwin', 'Migration messagerie Adwin - analyse'];
-const MIGRATION_STAGES = ['Analyse', 'Tenant', 'Copie', 'Prêt', 'Livraison'];
+const MIGRATION_STAGES = [
+    { key: 'analyse', label: 'Analyse', icon: Phone, tooltip: "Analyse avocatmail : rendez-vous téléphonique de prise d'information (1h) avec le client. Un ticket est créé à cette occasion." },
+    { key: 'tenant', label: 'Tenant', icon: Settings, tooltip: "Préparation du tenant : création du tenant, configuration du nom de domaine, licences, comptes, migration des données. Catégorie ticket : \"Préparation du tenant\"." },
+    { key: 'copie', label: 'Copie', icon: Copy, tooltip: "Copie (optionnelle) : migration/copie des données si nécessaire. Catégorie ticket : \"Copie en cours\"." },
+    { key: 'pret', label: 'Prêt', icon: Send, tooltip: "Prêt pour mise en place : demande d'intervention envoyée au service de planification. Catégorie ticket : \"Prêt pour mise en place\"." },
+    { key: 'livraison', label: 'Livraison', icon: Users, tooltip: "Finalisation & mise en place : migration MX (optionnelle) et déploiement des nouveaux comptes chez le client, via des événements planifiés par le service." }
+];
+
+const ALEA_INFO = {
+    'Attente client': { icon: Clock, tooltip: "Attente retour client : se positionne souvent entre la préparation du tenant et la copie en cours." },
+    'Attente presta': { icon: Clock, tooltip: "Attente retour prestataire : se positionne souvent entre la préparation du tenant et la copie en cours." },
+    'Bloquée': { icon: AlertTriangle, tooltip: "Bloquée cause client/presta : peut se positionner avant la préparation du tenant, avant la copie, ou juste après la copie." },
+    'Suspendu': { icon: PauseCircle, tooltip: "Suspendu : blocage quasi définitif du projet, menant souvent à une annulation ou à la planification d'une nouvelle migration." }
+};
+
+// Icône du cas particulier affiché en pointillé après l'étape Livraison :
+// formation (ADAPPS) vs autre intervention déjà prévue. Basé sur le libellé
+// de l'événement faute d'un champ de type dédié dans la vue Snowflake.
+const getCasParticulierIcon = (label) => {
+    const l = safeString(label).toLowerCase();
+    if (l.includes('adapps') || l.includes('formation')) return GraduationCap;
+    return CalendarClock;
+};
 
 // Traduit la catégorie (et le motif) d'un ticket en position sur la frise.
 // HYPOTHÈSE À VALIDER : les catégories "attente"/"bloqué"/"suspendu" ne
@@ -294,50 +316,81 @@ const TeamManagerPanel = ({ techList, newTechName, setNewTechName, onAdd, onRemo
     </div>
 );
 
-// --- FRISE COMPACTE (une ligne, style flat) ---
-const MigrationTimelineMini = ({ currentIndex, alea }) => (
-    <div className="flex items-center w-full">
-        {MIGRATION_STAGES.map((stage, i) => {
-            const stepNum = i + 1;
-            const isDone = stepNum < currentIndex;
-            const isCurrent = stepNum === currentIndex;
-            return (
-                <React.Fragment key={stage}>
-                    <div className="flex flex-col items-center gap-1.5 shrink-0">
-                        <div className={`w-2.5 h-2.5 rounded-full transition-colors ${
-                            isCurrent ? (alea ? 'bg-amber-500 ring-4 ring-amber-100' : 'bg-blue-600 ring-4 ring-blue-100') :
-                            isDone ? 'bg-blue-300' : 'bg-slate-200'
-                        }`} />
-                        <span className={`text-[10px] font-medium whitespace-nowrap ${isCurrent ? 'text-slate-800' : isDone ? 'text-slate-400' : 'text-slate-300'}`}>{stage}</span>
+// --- FRISE COMPACTE (icônes + infobulles, mode normal ou compact, avec cas particulier optionnel) ---
+const MigrationTimelineMini = ({ currentIndex, alea, casParticulier, compact }) => {
+    const iconSize = compact ? 11 : 14;
+    const circleSize = compact ? 'w-5 h-5' : 'w-7 h-7';
+    const topOffset = compact ? '9px' : '13px';
+    const CasIcon = casParticulier ? getCasParticulierIcon(casParticulier.label) : null;
+    return (
+        <div className="flex items-start w-full">
+            {MIGRATION_STAGES.map((stage, i) => {
+                const stepNum = i + 1;
+                const isDone = stepNum < currentIndex;
+                const isCurrent = stepNum === currentIndex;
+                const StageIcon = stage.icon;
+                return (
+                    <React.Fragment key={stage.key}>
+                        <div className="flex flex-col items-center gap-1 shrink-0" title={stage.tooltip}>
+                            <div className={`${circleSize} rounded-full flex items-center justify-center transition-colors cursor-help ${
+                                isCurrent ? (alea ? 'bg-amber-100 ring-4 ring-amber-50' : 'bg-blue-600 ring-4 ring-blue-100') :
+                                isDone ? 'bg-blue-100' : 'bg-slate-100'
+                            }`}>
+                                <StageIcon size={iconSize} className={isCurrent ? (alea ? 'text-amber-700' : 'text-white') : isDone ? 'text-blue-500' : 'text-slate-400'} />
+                            </div>
+                            {!compact && <span className={`text-[10px] font-medium whitespace-nowrap ${isCurrent ? 'text-slate-800' : isDone ? 'text-slate-400' : 'text-slate-300'}`}>{stage.label}</span>}
+                        </div>
+                        {(i < MIGRATION_STAGES.length - 1 || casParticulier) && (
+                            <div className="flex-1 mx-1 rounded-full" style={{ height: '2px', marginTop: topOffset, backgroundColor: stepNum < currentIndex ? '#93C5FD' : '#EAECF0' }} />
+                        )}
+                    </React.Fragment>
+                );
+            })}
+            {casParticulier && (
+                <>
+                    <div className="flex-1 mx-1" style={{ marginTop: topOffset, borderTop: '2px dashed #CBD5E1' }} />
+                    <div className="flex flex-col items-center gap-1 shrink-0" title={`Cas particulier : ${casParticulier.label}${casParticulier.date ? ' — ' + casParticulier.date.toLocaleDateString('fr-FR') : ''}`}>
+                        <div className={`${circleSize} rounded-full flex items-center justify-center bg-purple-100 ring-4 ring-purple-50 cursor-help`}>
+                            <CasIcon size={iconSize} className="text-purple-600" />
+                        </div>
+                        {!compact && <span className="text-[10px] font-medium whitespace-nowrap text-purple-600">{casParticulier.date ? casParticulier.date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : 'Cas part.'}</span>}
                     </div>
-                    {i < MIGRATION_STAGES.length - 1 && (
-                        <div className={`flex-1 h-0.5 mb-4 mx-1 rounded-full ${stepNum < currentIndex ? 'bg-blue-300' : 'bg-slate-150'}`} style={stepNum >= currentIndex ? { backgroundColor: '#EAECF0' } : undefined} />
-                    )}
-                </React.Fragment>
-            );
-        })}
-    </div>
-);
+                </>
+            )}
+        </div>
+    );
+};
 
-// --- CARTE "MA MIGRATION" ---
-const MigrationCard = ({ migration }) => {
+// --- LIGNE "MA MIGRATION" (condensée, dépliable au clic) ---
+const MigrationRow = ({ migration, isExpanded, onToggle }) => {
     const formatDate = (d) => d ? d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : null;
     return (
-        <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-start justify-between mb-4 gap-2">
-                <div>
-                    <h4 className="text-sm font-bold text-slate-800">{migration.clientName}</h4>
-                    <p className="text-[11px] text-slate-400">Dossier n°{migration.numDossier}</p>
+        <div className="border-b border-slate-100 last:border-b-0">
+            <button onClick={onToggle} className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 transition-colors text-left">
+                <div className="w-32 sm:w-40 shrink-0">
+                    <p className="text-xs font-bold text-slate-800 truncate">{migration.clientName}</p>
+                    <p className="text-[10px] text-slate-400">n°{migration.numDossier}</p>
+                </div>
+                <div className="flex-1 min-w-0">
+                    <MigrationTimelineMini currentIndex={migration.stageIndex} alea={migration.alea} casParticulier={migration.casParticulier} compact />
                 </div>
                 {migration.alea && (
-                    <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-amber-50 text-amber-700 border border-amber-100">{migration.alea}</span>
+                    <span className="hidden sm:inline shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase bg-amber-50 text-amber-700 border border-amber-100">{migration.alea}</span>
                 )}
-            </div>
-            <MigrationTimelineMini currentIndex={migration.stageIndex} alea={migration.alea} />
-            {(migration.analysisDate || migration.livraisonDate) && (
-                <div className="flex items-center gap-3 mt-3 pt-3 border-t border-slate-100 text-[11px] text-slate-400">
-                    {migration.analysisDate && <span>Analyse : {formatDate(migration.analysisDate)}</span>}
-                    {migration.livraisonDate && <span>Planifié : {formatDate(migration.livraisonDate)}</span>}
+                <ChevronDown size={14} className={`shrink-0 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+            </button>
+            {isExpanded && (
+                <div className="px-4 pb-4 pt-2 bg-slate-50/60 animate-in fade-in duration-150">
+                    <MigrationTimelineMini currentIndex={migration.stageIndex} alea={migration.alea} casParticulier={migration.casParticulier} />
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 pt-3 border-t border-slate-200 text-[11px] text-slate-500">
+                        {migration.analysisDate && <span>Analyse : {formatDate(migration.analysisDate)}</span>}
+                        {migration.livraisonDate && <span>Planifié : {formatDate(migration.livraisonDate)}</span>}
+                        {migration.casParticulier && (
+                            <span className="text-purple-600 font-medium">
+                                {migration.casParticulier.label}{migration.casParticulier.date ? ` (${formatDate(migration.casParticulier.date)})` : ''}
+                            </span>
+                        )}
+                    </div>
                 </div>
             )}
         </div>
@@ -561,6 +614,7 @@ function MigrationDashboard() {
   const isDebugAllowed = isAdmin || (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug') === '1');
   const currentTechName = normalizeTechName(user?.fullName, techList);
   const [viewAsTech, setViewAsTech] = useState(null);
+  const [expandedDossier, setExpandedDossier] = useState(null);
   const effectiveTechName = (isAdmin && viewAsTech) ? viewAsTech : currentTechName;
 
   const showToast = useCallback((message, type = 'success') => {
@@ -1089,13 +1143,23 @@ function MigrationDashboard() {
     return Array.from(byDossier.values()).map(dossier => {
       const linkedEvents = (backofficeData || []).filter(e => safeString(e.NUMDOSSIER) === dossier.numDossier);
       const analysisEvent = linkedEvents.find(e => ANALYSIS_EVENT_NAMES.includes(safeString(e.EVENEMENT)));
-      const otherEvents = linkedEvents.filter(e => e !== analysisEvent);
+      // Le reste des événements du dossier, triés chronologiquement : le
+      // premier est supposé être la livraison (MX / mise en place), tout
+      // événement suivant est traité comme "cas particulier" (formation
+      // ADAPPS ou autre intervention déjà prévue).
+      const otherEventsSorted = linkedEvents
+        .filter(e => e !== analysisEvent)
+        .map(e => ({ ...e, _date: parseDateSafe(e.DATE) }))
+        .filter(e => e._date)
+        .sort((a, b) => a._date - b._date);
+      const livraisonEvent = otherEventsSorted[0] || null;
+      const casParticulierEvent = otherEventsSorted[1] || null;
       const stage = getMigrationStage(dossier.categorie, dossier.motif);
       // Heuristique : si "Prêt pour mise en place" ET qu'un événement de
       // planification (hors analyse) existe déjà pour ce dossier, on
       // considère la livraison enclenchée. À valider avec un vrai libellé
       // d'événement de finalisation si disponible.
-      const stageIndex = (stage.index === 4 && otherEvents.length > 0 && !stage.alea) ? 5 : stage.index;
+      const stageIndex = (stage.index === 4 && livraisonEvent && !stage.alea) ? 5 : stage.index;
       const clientName = dossier.interlocuteur || safeString(linkedEvents[0]?.DOSSIER) || `Dossier ${dossier.numDossier}`;
       return {
         ...dossier,
@@ -1103,7 +1167,8 @@ function MigrationDashboard() {
         stageIndex,
         alea: stage.alea,
         analysisDate: parseDateSafe(analysisEvent?.DATE),
-        livraisonDate: parseDateSafe(otherEvents[0]?.DATE)
+        livraisonDate: livraisonEvent?._date || null,
+        casParticulier: casParticulierEvent ? { label: safeString(casParticulierEvent.EVENEMENT || casParticulierEvent.LIBELLE || 'Événement particulier'), date: casParticulierEvent._date } : null
       };
     }).sort((a, b) => (a.stageIndex || 0) - (b.stageIndex || 0));
   }, [encoursData, backofficeData, effectiveTechName, techList]);
@@ -1487,8 +1552,15 @@ function MigrationDashboard() {
               Aucun dossier actif trouvé pour le moment.
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {myMigrations.map(m => <MigrationCard key={m.numDossier} migration={m} />)}
+            <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
+              {myMigrations.map(m => (
+                <MigrationRow
+                  key={m.numDossier}
+                  migration={m}
+                  isExpanded={expandedDossier === m.numDossier}
+                  onToggle={() => setExpandedDossier(expandedDossier === m.numDossier ? null : m.numDossier)}
+                />
+              ))}
             </div>
           )}
         </div>
