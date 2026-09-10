@@ -385,7 +385,7 @@ const TeamManagerPanel = ({ techList, newTechName, setNewTechName, onAdd, onRemo
 );
 
 // --- FRISE COMPACTE (icônes + infobulles, mode normal ou compact, avec cas particulier optionnel) ---
-const MigrationTimelineMini = ({ currentIndex, alea, casParticulier, compact }) => {
+const MigrationTimelineMini = ({ currentIndex, alea, casParticulier, compact, livraisonDifferentTech, livraisonAssignee }) => {
     const iconSize = compact ? 15 : 20;
     const circleSize = compact ? 'w-7 h-7' : 'w-10 h-10';
     const casSlotWidth = compact ? 'w-16' : 'w-24';
@@ -404,20 +404,27 @@ const MigrationTimelineMini = ({ currentIndex, alea, casParticulier, compact }) 
                     const isDone = stepNum < currentIndex;
                     const isCurrent = stepNum === currentIndex;
                     const StageIcon = stage.icon;
+                    // Cas fréquent : l'analyse/le ticket sont portés par un
+                    // technicien, mais la finalisation est planifiée sur un
+                    // autre — on le signale par une couleur distincte sur la
+                    // pastille Livraison plutôt que le bleu habituel.
+                    const isHandoff = stage.key === 'livraison' && isCurrent && livraisonDifferentTech;
+                    const tooltipText = isHandoff ? `${stage.tooltip} Finalisation prévue par ${livraisonAssignee}, pas par vous.` : stage.tooltip;
                     return (
                         <React.Fragment key={stage.key}>
-                            <div className="flex flex-col items-center gap-1 shrink-0" title={stage.tooltip}>
+                            <div className="flex flex-col items-center gap-1 shrink-0" title={tooltipText}>
                                 <div className={`${circleSize} rounded-full flex items-center justify-center transition-colors cursor-help ${
+                                    isHandoff ? 'bg-indigo-500 ring-4 ring-indigo-100' :
                                     isCurrent ? (alea ? 'bg-amber-100 ring-4 ring-amber-50' : 'bg-blue-600 ring-4 ring-blue-100') :
                                     isDone ? 'bg-blue-500' : 'bg-white border-2 border-dashed border-slate-200'
                                 }`}>
                                     {isDone ? (
                                         <CheckCircle2 size={iconSize} className="text-white" />
                                     ) : (
-                                        <StageIcon size={iconSize} className={isCurrent ? (alea ? 'text-amber-700' : 'text-white') : 'text-slate-300'} />
+                                        <StageIcon size={iconSize} className={isHandoff ? 'text-white' : isCurrent ? (alea ? 'text-amber-700' : 'text-white') : 'text-slate-300'} />
                                     )}
                                 </div>
-                                {!compact && <span className={`text-[10px] font-medium whitespace-nowrap ${isCurrent ? 'text-slate-800' : isDone ? 'text-blue-500' : 'text-slate-300'}`}>{stage.label}</span>}
+                                {!compact && <span className={`text-[10px] font-medium whitespace-nowrap ${isHandoff ? 'text-indigo-600' : isCurrent ? 'text-slate-800' : isDone ? 'text-blue-500' : 'text-slate-300'}`}>{stage.label}</span>}
                             </div>
                             {i < MIGRATION_STAGES.length - 1 && (
                                 <div className="flex-1 mx-1 rounded-full" style={{ height: '2px', minWidth: '12px', marginTop: topOffset, backgroundColor: stepNum < currentIndex ? '#93C5FD' : '#EAECF0' }} />
@@ -465,7 +472,7 @@ const MigrationRow = ({ migration, isExpanded, onToggle }) => {
                 </div>
                 <div className="min-w-0">
                     {!isExpanded && (
-                        <MigrationTimelineMini currentIndex={migration.stageIndex} alea={migration.alea} casParticulier={migration.casParticulier} compact />
+                        <MigrationTimelineMini currentIndex={migration.stageIndex} alea={migration.alea} casParticulier={migration.casParticulier} livraisonDifferentTech={migration.livraisonDifferentTech} livraisonAssignee={migration.livraisonAssignee} compact />
                     )}
                 </div>
                 <div className="hidden sm:flex min-w-0">
@@ -478,11 +485,14 @@ const MigrationRow = ({ migration, isExpanded, onToggle }) => {
             {isExpanded && (
                 <div className="px-4 pb-4 pt-2 bg-slate-50/60 animate-in fade-in duration-150">
                     <div onClick={onToggle} className="cursor-pointer">
-                        <MigrationTimelineMini currentIndex={migration.stageIndex} alea={migration.alea} casParticulier={migration.casParticulier} />
+                        <MigrationTimelineMini currentIndex={migration.stageIndex} alea={migration.alea} casParticulier={migration.casParticulier} livraisonDifferentTech={migration.livraisonDifferentTech} livraisonAssignee={migration.livraisonAssignee} />
                     </div>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 pt-3 border-t border-slate-200 text-[11px] text-slate-500">
                         {migration.analysisDate && <span>Analyse : {formatDate(migration.analysisDate)}</span>}
                         {migration.livraisonDate && <span>Planifié : {formatDate(migration.livraisonDate)}</span>}
+                        {migration.livraisonDifferentTech && (
+                            <span className="text-indigo-600 font-medium">Finalisation par : {migration.livraisonAssignee}</span>
+                        )}
                         {migration.casParticulier && (
                             <span className="text-red-600 font-medium">
                                 {migration.casParticulier.label}{migration.casParticulier.assignee ? ` — ${migration.casParticulier.assignee}` : ''}{migration.casParticulier.date ? ` (${formatDate(migration.casParticulier.date)})` : ''}
@@ -1491,6 +1501,13 @@ function MigrationDashboard() {
       const stageIndex = (stage.index === 4 && livraisonEvent && !stage.alea) ? 5 : stage.index;
       const dossierName = safeString(linkedEvents[0]?.DOSSIER) || dossier.interlocuteur || `Dossier ${dossier.numDossier}`;
 
+      // Cas fréquent : un technicien fait l'analyse et porte le ticket, mais
+      // la finalisation (mise en place / migration MX) est planifiée sur un
+      // autre technicien. On le repère en comparant le responsable de
+      // l'événement de livraison au technicien du dossier.
+      const livraisonAssignee = livraisonEvent ? normalizeTechName(livraisonEvent.RESPONSABLE, techList) : null;
+      const livraisonDifferentTech = !!(livraisonAssignee && livraisonAssignee !== 'Inconnu' && livraisonAssignee !== effectiveTechName);
+
       // "Cas particulier" : deux types possibles, on prend le plus proche
       // dans le temps si les deux existent.
       //  1. Formation ADAPPS — rattachée au même OFFER_ID que la livraison,
@@ -1558,6 +1575,8 @@ function MigrationDashboard() {
         alea: stage.alea,
         analysisDate: parseDateSafe(analysisEvent?.DATE),
         livraisonDate: livraisonEvent?._date || null,
+        livraisonAssignee,
+        livraisonDifferentTech,
         casParticulier,
         linkedTicket
       };
