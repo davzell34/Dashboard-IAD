@@ -607,19 +607,25 @@ const CustomTooltip = ({ active, payload, label }) => {
         </div>
         {byTechEntries.length > 0 && (
           <div className="mt-3 pt-2 border-t border-slate-100">
-            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Par technicien</p>
+            <div className="flex justify-between items-center text-[9px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">
+              <span>Technicien</span>
+              <span className="flex items-center gap-1 shrink-0">
+                <span className={COLORS.text_capacite}>Capa.</span>
+                <span className="text-slate-300">/</span>
+                <span className={COLORS.text_besoin}>Besoin</span>
+              </span>
+            </div>
             <div className="space-y-1 max-h-40 overflow-y-auto">
-              {byTechEntries.map(([tech, t]) => {
-                const techDispo = (t.capacite || 0) - ((t.besoin || 0) + (t.besoin_encours || 0));
-                return (
-                  <div key={tech} className="flex justify-between items-center gap-2">
-                    <span className="text-slate-600 truncate">{tech}</span>
-                    <span className={`font-medium shrink-0 ${techDispo >= 0 ? COLORS.text_ok : COLORS.text_danger}`}>
-                      {t.capacite.toFixed(0)}h / {(t.besoin + t.besoin_encours).toFixed(0)}h
-                    </span>
-                  </div>
-                );
-              })}
+              {byTechEntries.map(([tech, t]) => (
+                <div key={tech} className="flex justify-between items-center gap-2">
+                  <span className="text-slate-600 truncate">{tech}</span>
+                  <span className="font-medium shrink-0">
+                    <span className={COLORS.text_capacite}>{t.capacite.toFixed(0)}h</span>
+                    <span className="text-slate-300 mx-0.5">/</span>
+                    <span className={COLORS.text_besoin}>{(t.besoin + t.besoin_encours).toFixed(0)}h</span>
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         )}
