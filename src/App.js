@@ -276,6 +276,16 @@ const getCasParticulierIcon = (kind) => kind === 'formation' ? GraduationCap : W
 // (ex. "matériel" vs "materiel" selon la saisie du technicien).
 const stripAccents = (s) => safeString(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
+// Un dossier client peut avoir des événements sans rapport avec la migration
+// de messagerie (devis logiciel, licence, autre intervention technique...).
+// On ne considère "lié à la migration" qu'un événement dont le libellé
+// référence explicitement Avocatmail ou une migration MX — un simple
+// rapprochement par numéro de dossier laisserait passer du bruit.
+const isMigrationRelatedEvent = (eventName) => {
+    const n = stripAccents(eventName).toLowerCase();
+    return n.includes('avocatmail') || n.includes('migration messagerie') || /\bmx\b/.test(n);
+};
+
 // Traduit la catégorie (et le motif) d'un ticket en position sur la frise.
 // HYPOTHÈSE À VALIDER : les catégories "attente"/"bloqué"/"suspendu" ne
 // précisent pas sur quelle étape principale elles se sont greffées — on les
@@ -435,22 +445,30 @@ const MigrationRow = ({ migration, isExpanded, onToggle }) => {
     const formatDate = (d) => d ? d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : null;
     return (
         <div className="border-b border-slate-100 last:border-b-0">
-            <button onClick={onToggle} className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 transition-colors text-left">
-                <div className="w-36 sm:w-48 shrink-0">
+            {/* Grille à colonnes FIXES (nom | frise | aléa | chevron) : chaque
+                colonne garde toujours la même largeur, qu'elle soit vide ou
+                non, pour que la frise tombe au même endroit sur toutes les
+                lignes — contrairement à un flex où une colonne vide (pas
+                d'aléa) laissait plus de place à la frise que sur les lignes
+                qui en ont un. */}
+            <button onClick={onToggle} className="w-full grid grid-cols-[130px_1fr_90px_16px] sm:grid-cols-[190px_1fr_100px_16px] items-center gap-3 px-4 py-2.5 hover:bg-slate-50 transition-colors text-left">
+                <div className="min-w-0">
                     <p className="text-xs font-bold text-slate-800 truncate">{migration.dossierName}</p>
                     <div className="flex items-center gap-1.5 mt-0.5">
                         <span className="text-[10px] font-semibold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded shrink-0">n°{migration.numDossier}</span>
                         {migration.interlocuteur && <span className="text-[10px] text-slate-400 truncate">{migration.interlocuteur}</span>}
                     </div>
                 </div>
-                <div className="flex-1 min-w-0">
+                <div className="min-w-0">
                     {!isExpanded && (
                         <MigrationTimelineMini currentIndex={migration.stageIndex} alea={migration.alea} casParticulier={migration.casParticulier} compact />
                     )}
                 </div>
-                {migration.alea && (
-                    <span className="hidden sm:inline shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase bg-amber-50 text-amber-700 border border-amber-100">{migration.alea}</span>
-                )}
+                <div className="hidden sm:flex min-w-0">
+                    {migration.alea && (
+                        <span className="truncate px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase bg-amber-50 text-amber-700 border border-amber-100">{migration.alea}</span>
+                    )}
+                </div>
                 <ChevronDown size={14} className={`shrink-0 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
             </button>
             {isExpanded && (
@@ -741,6 +759,7 @@ function MigrationDashboard() {
   const [viewAsTech, setViewAsTech] = useState(null);
   const [expandedDossier, setExpandedDossier] = useState(null);
   const [migrationStageFilter, setMigrationStageFilter] = useState(null); // null = toutes les étapes
+  const [migrationDisplayMode, setMigrationDisplayMode] = useState('grouped'); // 'grouped' | 'list'
   const [migrationSortDir, setMigrationSortDir] = useState('asc');
   const [chartMode, setChartMode] = useState('weeks-all'); // 'months' | 'weeks-month' | 'weeks-all'
   const effectiveTechName = (isAdmin && viewAsTech) ? viewAsTech : currentTechName;
@@ -1442,10 +1461,17 @@ function MigrationDashboard() {
 
     return Array.from(byDossier.values()).map(dossier => {
       const linkedEvents = (backofficeData || []).filter(e => safeString(e.NUMDOSSIER) === dossier.numDossier);
-      const analysisEvent = linkedEvents.find(e => ANALYSIS_EVENT_NAMES.includes(safeString(e.EVENEMENT)));
-      // Le reste des événements du dossier, triés chronologiquement : le
-      // premier est supposé être la livraison (MX / mise en place).
-      const otherEventsSorted = linkedEvents
+      // Un dossier client peut avoir des événements sans rapport avec la
+      // migration (devis logiciel, licence, autre intervention technique...).
+      // On ne garde, pour la détection analyse/livraison, que les événements
+      // dont le libellé référence explicitement Avocatmail/MX — le simple
+      // rapprochement par numéro de dossier n'est pas suffisant.
+      const migrationEvents = linkedEvents.filter(e => isMigrationRelatedEvent(e.EVENEMENT));
+      const analysisEvent = migrationEvents.find(e => ANALYSIS_EVENT_NAMES.includes(safeString(e.EVENEMENT)));
+      // Le reste des événements de migration du dossier, triés
+      // chronologiquement : le premier est supposé être la livraison (MX /
+      // mise en place).
+      const otherEventsSorted = migrationEvents
         .filter(e => e !== analysisEvent)
         .map(e => ({ ...e, _date: parseDateSafe(e.DATE) }))
         .filter(e => e._date)
@@ -1538,6 +1564,28 @@ function MigrationDashboard() {
     list = [...list].sort((a, b) => migrationSortDir === 'asc' ? (a.stageIndex || 0) - (b.stageIndex || 0) : (b.stageIndex || 0) - (a.stageIndex || 0));
     return list;
   }, [myMigrations, migrationStageFilter, migrationSortDir]);
+
+  // Regroupement pour la "Vue par étape" : les dossiers en aléa (attente/
+  // bloqué/suspendu) sortent de leur étape numérique pour former leur propre
+  // groupe transversal, plutôt que de se mélanger avec les dossiers qui
+  // avancent normalement à cette même étape.
+  const groupedMigrations = useMemo(() => {
+    const groupDefs = [
+      { key: 'stage-1', label: "Migrations en attente d'analyse" },
+      { key: 'stage-2', label: "Migrations en cours de préparation" },
+      { key: 'stage-3', label: "Migrations en cours de copie / à planifier" },
+      { key: 'stage-4', label: "Migrations prêtes pour finalisation" },
+      { key: 'stage-5', label: "Migrations en cours de livraison" },
+      { key: 'alea', label: "Migration en attente d'un retour client et/ou bloquées" }
+    ];
+    const buckets = new Map(groupDefs.map(g => [g.key, []]));
+    displayedMigrations.forEach(m => {
+      const key = m.alea ? 'alea' : `stage-${m.stageIndex}`;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(m);
+    });
+    return groupDefs.map(g => ({ ...g, items: buckets.get(g.key) || [] })).filter(g => g.items.length > 0);
+  }, [displayedMigrations]);
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500 relative">
@@ -1972,6 +2020,22 @@ function MigrationDashboard() {
             )}
           </div>
           {myMigrations.length > 0 && (
+            <div className="flex items-center gap-1 mb-3 bg-slate-100/70 p-1 rounded-lg w-fit">
+              <button
+                onClick={() => setMigrationDisplayMode('grouped')}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${migrationDisplayMode === 'grouped' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                Vue par étape
+              </button>
+              <button
+                onClick={() => setMigrationDisplayMode('list')}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${migrationDisplayMode === 'list' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                Vue liste
+              </button>
+            </div>
+          )}
+          {myMigrations.length > 0 && (
             <div className="flex items-center gap-2 mb-3 flex-wrap">
               <div className="relative">
                 <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400 pointer-events-none" />
@@ -1984,14 +2048,16 @@ function MigrationDashboard() {
                   {MIGRATION_STAGES.map((s, i) => (<option key={s.key} value={i + 1}>{s.label}</option>))}
                 </select>
               </div>
-              <button
-                onClick={() => setMigrationSortDir(d => d === 'asc' ? 'desc' : 'asc')}
-                className="flex items-center gap-1 px-2.5 py-1.5 text-xs bg-white border border-slate-200 text-slate-600 rounded-md hover:bg-slate-50 transition-colors"
-                title="Inverser l'ordre de tri par étape"
-              >
-                {migrationSortDir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
-                Étape {migrationSortDir === 'asc' ? '1 → 5' : '5 → 1'}
-              </button>
+              {migrationDisplayMode === 'list' && (
+                <button
+                  onClick={() => setMigrationSortDir(d => d === 'asc' ? 'desc' : 'asc')}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs bg-white border border-slate-200 text-slate-600 rounded-md hover:bg-slate-50 transition-colors"
+                  title="Inverser l'ordre de tri par étape"
+                >
+                  {migrationSortDir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
+                  Étape {migrationSortDir === 'asc' ? '1 → 5' : '5 → 1'}
+                </button>
+              )}
               {migrationStageFilter && (
                 <span className="text-[11px] text-slate-400">{displayedMigrations.length} dossier{displayedMigrations.length > 1 ? 's' : ''}</span>
               )}
@@ -2004,6 +2070,25 @@ function MigrationDashboard() {
           ) : displayedMigrations.length === 0 ? (
             <div className="bg-white p-8 rounded-xl border border-slate-200/80 text-center text-sm text-slate-400 italic">
               Aucun dossier à cette étape.
+            </div>
+          ) : migrationDisplayMode === 'grouped' ? (
+            <div className="space-y-4">
+              {groupedMigrations.map(group => (
+                <div key={group.key} className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
+                  <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                    <p className="text-xs font-bold text-slate-600">{group.label}</p>
+                    <span className="text-[10px] text-slate-400">{group.items.length}</span>
+                  </div>
+                  {group.items.map(m => (
+                    <MigrationRow
+                      key={m.numDossier}
+                      migration={m}
+                      isExpanded={expandedDossier === m.numDossier}
+                      onToggle={() => setExpandedDossier(expandedDossier === m.numDossier ? null : m.numDossier)}
+                    />
+                  ))}
+                </div>
+              ))}
             </div>
           ) : (
             <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
