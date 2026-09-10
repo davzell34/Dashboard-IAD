@@ -378,48 +378,54 @@ const TeamManagerPanel = ({ techList, newTechName, setNewTechName, onAdd, onRemo
 const MigrationTimelineMini = ({ currentIndex, alea, casParticulier, compact }) => {
     const iconSize = compact ? 15 : 20;
     const circleSize = compact ? 'w-7 h-7' : 'w-10 h-10';
-    const connectorWidth = compact ? 'w-10' : 'w-16';
+    const casSlotWidth = compact ? 'w-16' : 'w-24';
     const topOffset = compact ? '13px' : '19px';
     const CasIcon = casParticulier ? getCasParticulierIcon(casParticulier.kind) : null;
     return (
-        // Largeur fixe (pas flex-1) sur les connecteurs : les étapes 1 à 5
-        // tombent ainsi toujours à la même position, qu'il y ait ou non un
-        // cas particulier en bout de frise sur telle ou telle ligne.
-        <div className="flex items-start">
-            {MIGRATION_STAGES.map((stage, i) => {
-                const stepNum = i + 1;
-                const isDone = stepNum < currentIndex;
-                const isCurrent = stepNum === currentIndex;
-                const StageIcon = stage.icon;
-                return (
-                    <React.Fragment key={stage.key}>
-                        <div className="flex flex-col items-center gap-1 shrink-0" title={stage.tooltip}>
-                            <div className={`${circleSize} rounded-full flex items-center justify-center transition-colors cursor-help ${
-                                isCurrent ? (alea ? 'bg-amber-100 ring-4 ring-amber-50' : 'bg-blue-600 ring-4 ring-blue-100') :
-                                isDone ? 'bg-blue-100' : 'bg-slate-100'
-                            }`}>
-                                <StageIcon size={iconSize} className={isCurrent ? (alea ? 'text-amber-700' : 'text-white') : isDone ? 'text-blue-500' : 'text-slate-400'} />
+        // Les 5 étapes principales occupent tout l'espace disponible (connecteurs
+        // élastiques) pour que la frise remplisse la largeur de la ligne. Le
+        // segment "cas particulier" occupe un slot de largeur FIXE, toujours
+        // réservé (même vide) : ça garde une largeur totale identique sur
+        // toutes les lignes, donc le chevron reste aligné à droite partout.
+        <div className="flex items-start w-full">
+            <div className="flex items-start flex-1 min-w-0">
+                {MIGRATION_STAGES.map((stage, i) => {
+                    const stepNum = i + 1;
+                    const isDone = stepNum < currentIndex;
+                    const isCurrent = stepNum === currentIndex;
+                    const StageIcon = stage.icon;
+                    return (
+                        <React.Fragment key={stage.key}>
+                            <div className="flex flex-col items-center gap-1 shrink-0" title={stage.tooltip}>
+                                <div className={`${circleSize} rounded-full flex items-center justify-center transition-colors cursor-help ${
+                                    isCurrent ? (alea ? 'bg-amber-100 ring-4 ring-amber-50' : 'bg-blue-600 ring-4 ring-blue-100') :
+                                    isDone ? 'bg-blue-100' : 'bg-slate-100'
+                                }`}>
+                                    <StageIcon size={iconSize} className={isCurrent ? (alea ? 'text-amber-700' : 'text-white') : isDone ? 'text-blue-500' : 'text-slate-400'} />
+                                </div>
+                                {!compact && <span className={`text-[10px] font-medium whitespace-nowrap ${isCurrent ? 'text-slate-800' : isDone ? 'text-slate-400' : 'text-slate-300'}`}>{stage.label}</span>}
                             </div>
-                            {!compact && <span className={`text-[10px] font-medium whitespace-nowrap ${isCurrent ? 'text-slate-800' : isDone ? 'text-slate-400' : 'text-slate-300'}`}>{stage.label}</span>}
+                            {i < MIGRATION_STAGES.length - 1 && (
+                                <div className="flex-1 mx-1 rounded-full" style={{ height: '2px', minWidth: '12px', marginTop: topOffset, backgroundColor: stepNum < currentIndex ? '#93C5FD' : '#EAECF0' }} />
+                            )}
+                        </React.Fragment>
+                    );
+                })}
+            </div>
+            <div className={`${casSlotWidth} shrink-0 flex items-start`}>
+                {casParticulier && (
+                    <>
+                        <div className="flex-1 mx-1" style={{ marginTop: topOffset, borderTop: '2px dashed #F87171' }} />
+                        <div className="flex flex-col items-center gap-1 shrink-0" title={`Cas particulier : ${casParticulier.label}${casParticulier.date ? ' — ' + casParticulier.date.toLocaleDateString('fr-FR') : ''}`}>
+                            <div className={`${circleSize} rounded-full flex items-center justify-center bg-red-100 ring-4 ring-red-50 cursor-help`}>
+                                <CasIcon size={iconSize} className="text-red-600" />
+                            </div>
+                            {/* La date du cas particulier reste visible même en mode compact (contrairement aux libellés des autres étapes) */}
+                            <span className="text-[10px] font-medium whitespace-nowrap text-red-600">{casParticulier.date ? casParticulier.date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : 'Cas part.'}</span>
                         </div>
-                        {(i < MIGRATION_STAGES.length - 1 || casParticulier) && (
-                            <div className={`${connectorWidth} shrink-0 mx-1 rounded-full`} style={{ height: '2px', marginTop: topOffset, backgroundColor: stepNum < currentIndex ? '#93C5FD' : '#EAECF0' }} />
-                        )}
-                    </React.Fragment>
-                );
-            })}
-            {casParticulier && (
-                <>
-                    <div className={`${connectorWidth} shrink-0 mx-1`} style={{ marginTop: topOffset, borderTop: '2px dashed #F87171' }} />
-                    <div className="flex flex-col items-center gap-1 shrink-0" title={`Cas particulier : ${casParticulier.label}${casParticulier.date ? ' — ' + casParticulier.date.toLocaleDateString('fr-FR') : ''}`}>
-                        <div className={`${circleSize} rounded-full flex items-center justify-center bg-red-100 ring-4 ring-red-50 cursor-help`}>
-                            <CasIcon size={iconSize} className="text-red-600" />
-                        </div>
-                        {/* La date du cas particulier reste visible même en mode compact (contrairement aux libellés des autres étapes) */}
-                        <span className="text-[10px] font-medium whitespace-nowrap text-red-600">{casParticulier.date ? casParticulier.date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : 'Cas part.'}</span>
-                    </div>
-                </>
-            )}
+                    </>
+                )}
+            </div>
         </div>
     );
 };
@@ -437,7 +443,7 @@ const MigrationRow = ({ migration, isExpanded, onToggle }) => {
                         {migration.interlocuteur && <span className="text-[10px] text-slate-400 truncate">{migration.interlocuteur}</span>}
                     </div>
                 </div>
-                <div className="shrink-0 overflow-hidden">
+                <div className="flex-1 min-w-0">
                     {!isExpanded && (
                         <MigrationTimelineMini currentIndex={migration.stageIndex} alea={migration.alea} casParticulier={migration.casParticulier} compact />
                     )}
@@ -445,7 +451,7 @@ const MigrationRow = ({ migration, isExpanded, onToggle }) => {
                 {migration.alea && (
                     <span className="hidden sm:inline shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase bg-amber-50 text-amber-700 border border-amber-100">{migration.alea}</span>
                 )}
-                <ChevronDown size={14} className={`shrink-0 ml-auto text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                <ChevronDown size={14} className={`shrink-0 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
             </button>
             {isExpanded && (
                 <div className="px-4 pb-4 pt-2 bg-slate-50/60 animate-in fade-in duration-150">
@@ -587,8 +593,9 @@ const CustomTooltip = ({ active, payload, label }) => {
     const data = payload[0].payload;
     const dispo = (data.capacite || 0) - ((data.besoin || 0) + (data.besoin_encours || 0));
     const isPositive = dispo >= 0;
+    const byTechEntries = data.byTech ? Object.entries(data.byTech).sort((a, b) => a[0].localeCompare(b[0])) : [];
     return (
-      <div className="bg-white p-3 border border-slate-200 shadow-xl rounded-lg text-xs min-w-[180px]">
+      <div className="bg-white p-3 border border-slate-200 shadow-xl rounded-lg text-xs min-w-[180px] max-w-[280px]">
         <p className="font-bold text-slate-800 mb-2 border-b border-slate-100 pb-1">{data.weekSort !== undefined ? data.label : formatMonth(data.month)}</p>
         <div className="space-y-1">
             <div className={`flex justify-between items-center ${COLORS.text_besoin}`}><span>Besoin (Nouv) :</span><span className="font-bold">{data.besoin?.toFixed(1)} h</span></div>
@@ -598,6 +605,24 @@ const CustomTooltip = ({ active, payload, label }) => {
         <div className={`mt-3 pt-2 border-t border-slate-100 flex justify-between items-center font-bold text-sm ${isPositive ? COLORS.text_ok : COLORS.text_danger}`}>
             <span>DISPONIBLE :</span><span>{isPositive ? '+' : ''}{dispo.toFixed(1)} h</span>
         </div>
+        {byTechEntries.length > 0 && (
+          <div className="mt-3 pt-2 border-t border-slate-100">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Par technicien</p>
+            <div className="space-y-1 max-h-40 overflow-y-auto">
+              {byTechEntries.map(([tech, t]) => {
+                const techDispo = (t.capacite || 0) - ((t.besoin || 0) + (t.besoin_encours || 0));
+                return (
+                  <div key={tech} className="flex justify-between items-center gap-2">
+                    <span className="text-slate-600 truncate">{tech}</span>
+                    <span className={`font-medium shrink-0 ${techDispo >= 0 ? COLORS.text_ok : COLORS.text_danger}`}>
+                      {t.capacite.toFixed(0)}h / {(t.besoin + t.besoin_encours).toFixed(0)}h
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1189,20 +1214,31 @@ function MigrationDashboard() {
 
   const weeklyAggregatedData = useMemo(() => {
       if (!selectedMonth) return [];
-      let relevantEvents = eventsData.filter(e => e.date !== "N/A" && e.date.startsWith(selectedMonth));
-      if (selectedTech !== 'Tous') relevantEvents = relevantEvents.filter(e => e.tech === selectedTech);
+      const monthEvents = eventsData.filter(e => e.date !== "N/A" && e.date.startsWith(selectedMonth));
+      const relevantEvents = selectedTech !== 'Tous' ? monthEvents.filter(e => e.tech === selectedTech) : monthEvents;
       const weekMap = new Map();
-      relevantEvents.forEach(evt => {
-          const weekNum = getWeekLabel(evt.date); 
-          const weekRange = getWeekRange(evt.date); 
-          const label = `${weekNum} (${weekRange})`; 
+      const ensureEntry = (weekNum, evt) => {
           if (!weekMap.has(weekNum)) {
-              weekMap.set(weekNum, { month: weekNum, label: label, weekSort: parseInt(weekNum.replace('S', '')), besoin: 0, besoin_encours: 0, capacite: 0, weekEnd: getWeekEndDate(evt.date) });
+              const label = `${weekNum} (${getWeekRange(evt.date)})`;
+              weekMap.set(weekNum, { month: weekNum, label, weekSort: parseInt(weekNum.replace('S', '')), besoin: 0, besoin_encours: 0, capacite: 0, weekEnd: getWeekEndDate(evt.date), byTech: {} });
           }
-          const entry = weekMap.get(weekNum);
+          return weekMap.get(weekNum);
+      };
+      relevantEvents.forEach(evt => {
+          const entry = ensureEntry(getWeekLabel(evt.date), evt);
           entry.besoin += (evt.raw_besoin || 0);
           entry.besoin_encours += (evt.raw_besoin_encours || 0);
           entry.capacite += (evt.raw_capacite || 0);
+      });
+      // Détail par technicien pour l'infobulle : toujours calculé sur toute
+      // l'équipe, indépendamment du filtre technicien appliqué au graphique.
+      monthEvents.forEach(evt => {
+          const entry = ensureEntry(getWeekLabel(evt.date), evt);
+          if (!entry.byTech[evt.tech]) entry.byTech[evt.tech] = { besoin: 0, besoin_encours: 0, capacite: 0 };
+          const t = entry.byTech[evt.tech];
+          t.besoin += (evt.raw_besoin || 0);
+          t.besoin_encours += (evt.raw_besoin_encours || 0);
+          t.capacite += (evt.raw_capacite || 0);
       });
       const now = new Date();
       return Array.from(weekMap.values())
@@ -1214,26 +1250,45 @@ function MigrationDashboard() {
   // regroupées par (année, n° de semaine) pour éviter les collisions quand
   // le scope de dates chevauche deux années civiles.
   const allWeeksAggregatedData = useMemo(() => {
-      let relevantEvents = eventsData.filter(e => e.date !== "N/A");
-      if (selectedTech !== 'Tous') relevantEvents = relevantEvents.filter(e => e.tech === selectedTech);
+      const allEvents = eventsData.filter(e => e.date !== "N/A");
+      const relevantEvents = selectedTech !== 'Tous' ? allEvents.filter(e => e.tech === selectedTech) : allEvents;
       const weekMap = new Map();
-      relevantEvents.forEach(evt => {
+      const buildKey = (evt) => {
           const d = new Date(evt.date);
-          if (isNaN(d.getTime())) return;
-          const weekNum = getWeekLabel(evt.date);
-          const key = `${d.getFullYear()}-${weekNum}`;
-          const weekRange = getWeekRange(evt.date);
-          const label = `${weekNum} (${weekRange})`;
+          if (isNaN(d.getTime())) return null;
+          return { key: `${d.getFullYear()}-${getWeekLabel(evt.date)}`, d };
+      };
+      const ensureEntry = (key, d, evt) => {
           if (!weekMap.has(key)) {
+              const weekNum = getWeekLabel(evt.date);
+              const weekRange = getWeekRange(evt.date);
+              const label = `${weekNum} (${weekRange})`;
               const weekStart = getWeekStartDate(evt.date);
               const dateLabel = weekStart ? weekStart.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) : weekNum;
               const monthKey = weekStart ? `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}` : null;
-              weekMap.set(key, { month: key, label, shortLabel: weekNum, dateLabel, monthKey, year: d.getFullYear(), weekSort: parseInt(weekNum.replace('S', '')), besoin: 0, besoin_encours: 0, capacite: 0, weekEnd: getWeekEndDate(evt.date) });
+              weekMap.set(key, { month: key, label, shortLabel: weekNum, dateLabel, monthKey, year: d.getFullYear(), weekSort: parseInt(weekNum.replace('S', '')), besoin: 0, besoin_encours: 0, capacite: 0, weekEnd: getWeekEndDate(evt.date), byTech: {} });
           }
-          const entry = weekMap.get(key);
+          return weekMap.get(key);
+      };
+      relevantEvents.forEach(evt => {
+          const k = buildKey(evt);
+          if (!k) return;
+          const entry = ensureEntry(k.key, k.d, evt);
           entry.besoin += (evt.raw_besoin || 0);
           entry.besoin_encours += (evt.raw_besoin_encours || 0);
           entry.capacite += (evt.raw_capacite || 0);
+      });
+      // Détail par technicien pour l'infobulle : toujours calculé sur toute
+      // l'équipe, indépendamment du filtre technicien appliqué au graphique.
+      allEvents.forEach(evt => {
+          const k = buildKey(evt);
+          if (!k) return;
+          const entry = ensureEntry(k.key, k.d, evt);
+          if (!entry.byTech[evt.tech]) entry.byTech[evt.tech] = { besoin: 0, besoin_encours: 0, capacite: 0 };
+          const t = entry.byTech[evt.tech];
+          t.besoin += (evt.raw_besoin || 0);
+          t.besoin_encours += (evt.raw_besoin_encours || 0);
+          t.capacite += (evt.raw_capacite || 0);
       });
       const now = new Date();
       return Array.from(weekMap.values())
