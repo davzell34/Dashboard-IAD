@@ -465,6 +465,27 @@ const MigrationRow = ({ migration, isExpanded, onToggle }) => {
                             </span>
                         )}
                     </div>
+                    {migration.linkedTicket ? (
+                        <div className="mt-3 pt-3 border-t border-slate-200">
+                            <div className="flex items-center justify-between mb-2">
+                                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 flex items-center gap-1"><FileText size={11} /> Ticket lié</p>
+                                {migration.linkedTicket.etat && (
+                                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-100 text-slate-600 border border-slate-200">{migration.linkedTicket.etat}</span>
+                                )}
+                            </div>
+                            <p className="text-xs font-medium text-slate-700 mb-1.5">{migration.linkedTicket.motif}</p>
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                                {migration.linkedTicket.categorie && <span>Catégorie : <span className="text-slate-700 font-medium">{migration.linkedTicket.categorie}</span></span>}
+                                {migration.linkedTicket.creeLe && <span>Créé le : {formatDate(migration.linkedTicket.creeLe)}</span>}
+                                {migration.linkedTicket.derniereAction && <span>Dernière action : {formatDate(migration.linkedTicket.derniereAction)}</span>}
+                                {migration.linkedTicket.reporteLe && <span>Reporté au : {formatDate(migration.linkedTicket.reporteLe)}</span>}
+                                {migration.linkedTicket.dureeMinutes > 0 && <span>Durée : {(migration.linkedTicket.dureeMinutes / 60).toFixed(1)} h</span>}
+                                {migration.linkedTicket.nbRappelsClient > 0 && <span>Rappels client : {migration.linkedTicket.nbRappelsClient}</span>}
+                            </div>
+                        </div>
+                    ) : (
+                        <p className="mt-3 pt-3 border-t border-slate-200 text-[11px] text-slate-400 italic">Aucun ticket "[IAD] - Préparation Avocatmail" trouvé pour ce dossier.</p>
+                    )}
                 </div>
             )}
         </div>
@@ -713,7 +734,7 @@ function MigrationDashboard() {
   const [expandedDossier, setExpandedDossier] = useState(null);
   const [migrationStageFilter, setMigrationStageFilter] = useState(null); // null = toutes les étapes
   const [migrationSortDir, setMigrationSortDir] = useState('asc');
-  const [chartMode, setChartMode] = useState('months'); // 'months' | 'weeks-month' | 'weeks-all'
+  const [chartMode, setChartMode] = useState('weeks-all'); // 'months' | 'weeks-month' | 'weeks-all'
   const effectiveTechName = (isAdmin && viewAsTech) ? viewAsTech : currentTechName;
 
   const showToast = useCallback((message, type = 'success') => {
@@ -1390,11 +1411,18 @@ function MigrationDashboard() {
     if (!effectiveTechName || effectiveTechName === 'Inconnu') return [];
     const myTickets = (encoursData || []).filter(t => normalizeTechName(t.RESPONSABLE, techList) === effectiveTechName);
 
-    // Un dossier peut avoir plusieurs lignes de ticket ; on ne garde que la plus récente.
+    // Un dossier peut avoir plusieurs lignes de ticket : on garde la plus
+    // récente pour déterminer l'étape (statut courant), mais aussi la liste
+    // complète pour pouvoir retrouver le ticket "[IAD] - Préparation
+    // Avocatmail" spécifiquement (souvent une ligne distincte du dossier).
     const byDossier = new Map();
+    const allTicketsByDossier = new Map();
     myTickets.forEach(t => {
       const numDossier = safeString(t.NUMERO_DOSSIER);
       if (!numDossier) return;
+      if (!allTicketsByDossier.has(numDossier)) allTicketsByDossier.set(numDossier, []);
+      allTicketsByDossier.get(numDossier).push(t);
+
       const creeLe = parseDateSafe(t.CREE_LE);
       const existing = byDossier.get(numDossier);
       if (!existing || (creeLe && (!existing.creeLe || creeLe > existing.creeLe))) {
@@ -1462,6 +1490,23 @@ function MigrationDashboard() {
       candidates.sort((a, b) => a.date - b.date);
       const casParticulier = candidates[0] || null;
 
+      // Ticket lié à la migration : même dossier, même technicien, motif
+      // "[IAD] - Préparation Avocatmail" (ligne de suivi du travail de
+      // préparation, distincte de la ligne utilisée pour l'étape courante).
+      const dossierTickets = allTicketsByDossier.get(dossier.numDossier) || [];
+      const linkedTicketRaw = dossierTickets.find(t => safeString(t.MOTIF).startsWith('[IAD] - Préparation Avocatmail'));
+      const linkedTicket = linkedTicketRaw ? {
+        motif: safeString(linkedTicketRaw.MOTIF),
+        categorie: safeString(linkedTicketRaw.CATEGORIE),
+        etat: safeString(linkedTicketRaw.ETAT_PRIORITE),
+        interlocuteur: safeString(linkedTicketRaw.INTERLOCUTEUR),
+        creeLe: parseDateSafe(linkedTicketRaw.CREE_LE),
+        derniereAction: parseDateSafe(linkedTicketRaw.DERNIERE_ACTION),
+        reporteLe: parseDateSafe(linkedTicketRaw.REPORTE_LE),
+        dureeMinutes: Number(linkedTicketRaw.DUREE_MINUTES) || 0,
+        nbRappelsClient: Number(linkedTicketRaw.NB_RAPPELS_CLIENT) || 0
+      } : null;
+
       return {
         ...dossier,
         dossierName,
@@ -1469,7 +1514,8 @@ function MigrationDashboard() {
         alea: stage.alea,
         analysisDate: parseDateSafe(analysisEvent?.DATE),
         livraisonDate: livraisonEvent?._date || null,
-        casParticulier
+        casParticulier,
+        linkedTicket
       };
     }).sort((a, b) => (a.stageIndex || 0) - (b.stageIndex || 0));
   }, [encoursData, backofficeData, specialEventsData, effectiveTechName, techList]);
