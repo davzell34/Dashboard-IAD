@@ -365,10 +365,14 @@ const TeamManagerPanel = ({ techList, newTechName, setNewTechName, onAdd, onRemo
 const MigrationTimelineMini = ({ currentIndex, alea, casParticulier, compact }) => {
     const iconSize = compact ? 15 : 20;
     const circleSize = compact ? 'w-7 h-7' : 'w-10 h-10';
+    const connectorWidth = compact ? 'w-10' : 'w-16';
     const topOffset = compact ? '13px' : '19px';
     const CasIcon = casParticulier ? getCasParticulierIcon(casParticulier.kind) : null;
     return (
-        <div className="flex items-start w-full">
+        // Largeur fixe (pas flex-1) sur les connecteurs : les étapes 1 à 5
+        // tombent ainsi toujours à la même position, qu'il y ait ou non un
+        // cas particulier en bout de frise sur telle ou telle ligne.
+        <div className="flex items-start">
             {MIGRATION_STAGES.map((stage, i) => {
                 const stepNum = i + 1;
                 const isDone = stepNum < currentIndex;
@@ -386,19 +390,20 @@ const MigrationTimelineMini = ({ currentIndex, alea, casParticulier, compact }) 
                             {!compact && <span className={`text-[10px] font-medium whitespace-nowrap ${isCurrent ? 'text-slate-800' : isDone ? 'text-slate-400' : 'text-slate-300'}`}>{stage.label}</span>}
                         </div>
                         {(i < MIGRATION_STAGES.length - 1 || casParticulier) && (
-                            <div className="flex-1 mx-1 rounded-full" style={{ height: '2px', marginTop: topOffset, backgroundColor: stepNum < currentIndex ? '#93C5FD' : '#EAECF0' }} />
+                            <div className={`${connectorWidth} shrink-0 mx-1 rounded-full`} style={{ height: '2px', marginTop: topOffset, backgroundColor: stepNum < currentIndex ? '#93C5FD' : '#EAECF0' }} />
                         )}
                     </React.Fragment>
                 );
             })}
             {casParticulier && (
                 <>
-                    <div className="flex-1 mx-1" style={{ marginTop: topOffset, borderTop: '2px dashed #F87171' }} />
+                    <div className={`${connectorWidth} shrink-0 mx-1`} style={{ marginTop: topOffset, borderTop: '2px dashed #F87171' }} />
                     <div className="flex flex-col items-center gap-1 shrink-0" title={`Cas particulier : ${casParticulier.label}${casParticulier.date ? ' — ' + casParticulier.date.toLocaleDateString('fr-FR') : ''}`}>
                         <div className={`${circleSize} rounded-full flex items-center justify-center bg-red-100 ring-4 ring-red-50 cursor-help`}>
                             <CasIcon size={iconSize} className="text-red-600" />
                         </div>
-                        {!compact && <span className="text-[10px] font-medium whitespace-nowrap text-red-600">{casParticulier.date ? casParticulier.date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : 'Cas part.'}</span>}
+                        {/* La date du cas particulier reste visible même en mode compact (contrairement aux libellés des autres étapes) */}
+                        <span className="text-[10px] font-medium whitespace-nowrap text-red-600">{casParticulier.date ? casParticulier.date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : 'Cas part.'}</span>
                     </div>
                 </>
             )}
@@ -419,11 +424,12 @@ const MigrationRow = ({ migration, isExpanded, onToggle }) => {
                         {migration.interlocuteur && <span className="text-[10px] text-slate-400 truncate">{migration.interlocuteur}</span>}
                     </div>
                 </div>
-                <div className="flex-1 min-w-0">
+                <div className="shrink-0 overflow-hidden">
                     {!isExpanded && (
                         <MigrationTimelineMini currentIndex={migration.stageIndex} alea={migration.alea} casParticulier={migration.casParticulier} compact />
                     )}
                 </div>
+                <div className="flex-1" />
                 {migration.alea && (
                     <span className="hidden sm:inline shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase bg-amber-50 text-amber-700 border border-amber-100">{migration.alea}</span>
                 )}
@@ -664,6 +670,7 @@ function MigrationDashboard() {
   const [expandedDossier, setExpandedDossier] = useState(null);
   const [migrationStageFilter, setMigrationStageFilter] = useState(null); // null = toutes les étapes
   const [migrationSortDir, setMigrationSortDir] = useState('asc');
+  const [chartMode, setChartMode] = useState('months'); // 'months' | 'weeks-month' | 'weeks-all'
   const effectiveTechName = (isAdmin && viewAsTech) ? viewAsTech : currentTechName;
 
   const showToast = useCallback((message, type = 'success') => {
@@ -1178,7 +1185,35 @@ function MigrationDashboard() {
         .sort((a, b) => a.weekSort - b.weekSort);
   }, [eventsData, selectedMonth, selectedTech]);
 
-  const mainChartData = selectedMonth ? weeklyAggregatedData : monthlyAggregatedData;
+  // Toutes les semaines du scope, indépendamment du mois sélectionné —
+  // regroupées par (année, n° de semaine) pour éviter les collisions quand
+  // le scope de dates chevauche deux années civiles.
+  const allWeeksAggregatedData = useMemo(() => {
+      let relevantEvents = eventsData.filter(e => e.date !== "N/A");
+      if (selectedTech !== 'Tous') relevantEvents = relevantEvents.filter(e => e.tech === selectedTech);
+      const weekMap = new Map();
+      relevantEvents.forEach(evt => {
+          const d = new Date(evt.date);
+          if (isNaN(d.getTime())) return;
+          const weekNum = getWeekLabel(evt.date);
+          const key = `${d.getFullYear()}-${weekNum}`;
+          const weekRange = getWeekRange(evt.date);
+          const label = `${weekNum} (${weekRange})`;
+          if (!weekMap.has(key)) {
+              weekMap.set(key, { month: key, label, year: d.getFullYear(), weekSort: parseInt(weekNum.replace('S', '')), besoin: 0, besoin_encours: 0, capacite: 0, weekEnd: getWeekEndDate(evt.date) });
+          }
+          const entry = weekMap.get(key);
+          entry.besoin += (evt.raw_besoin || 0);
+          entry.besoin_encours += (evt.raw_besoin_encours || 0);
+          entry.capacite += (evt.raw_capacite || 0);
+      });
+      const now = new Date();
+      return Array.from(weekMap.values())
+        .map(w => ({ ...w, isPast: w.weekEnd ? w.weekEnd < now : false }))
+        .sort((a, b) => a.year - b.year || a.weekSort - b.weekSort);
+  }, [eventsData, selectedTech]);
+
+  const mainChartData = chartMode === 'months' ? monthlyAggregatedData : chartMode === 'weeks-all' ? allWeeksAggregatedData : weeklyAggregatedData;
 
   const techAggregatedData = useMemo(() => {
     const aggMap = new Map();
@@ -1207,16 +1242,24 @@ function MigrationDashboard() {
   }, [mainChartData]);
 
   const handleChartClick = (data) => {
-    if (data && data.activePayload && data.activePayload.length > 0 && !selectedMonth) {
+    if (data && data.activePayload && data.activePayload.length > 0 && chartMode === 'months') {
          const clickedData = data.activePayload[0].payload;
-         if(clickedData && clickedData.month) { setSelectedMonth(clickedData.month); setShowPlanning(false); }
+         if(clickedData && clickedData.month) { setSelectedMonth(clickedData.month); setChartMode('weeks-month'); setShowPlanning(false); }
     }
   };
 
   const toggleViewMode = (mode) => {
       setShowPlanning(false);
-      if (mode === 'months') { setSelectedMonth(null); } 
-      else { if (!selectedMonth) { const current = getCurrentMonthKey(); setSelectedMonth(availableMonths.includes(current) ? current : availableMonths[0]); } }
+      setChartMode(mode);
+      if (mode === 'months') {
+          setSelectedMonth(null);
+      } else if (mode === 'weeks-month') {
+          if (!selectedMonth) { const current = getCurrentMonthKey(); setSelectedMonth(availableMonths.includes(current) ? current : availableMonths[0]); }
+      } else if (mode === 'weeks-all') {
+          // Vue transversale, non filtrée par mois : on ne veut pas que le
+          // tableau détail se retrouve limité à un seul mois par effet de bord.
+          setSelectedMonth(null);
+      }
   };
 
   const getStatusBadgeColor = (colorCode) => {
@@ -1399,7 +1442,7 @@ function MigrationDashboard() {
                     {techList.map(tech => (<option key={tech} value={tech}>{tech}</option>))}
                 </select>
             </div>
-            {(selectedMonth || showPlanning) && (<button onClick={() => { setSelectedMonth(null); setShowPlanning(false); }} className="flex items-center gap-1 bg-red-50 text-red-600 px-3 py-1.5 rounded-md text-xs font-medium hover:bg-red-100 transition-colors border border-red-100"><X className="w-3 h-3" /> Retour Vue Globale</button>)}
+            {(selectedMonth || showPlanning) && (<button onClick={() => { setSelectedMonth(null); setShowPlanning(false); setChartMode('months'); }} className="flex items-center gap-1 bg-red-50 text-red-600 px-3 py-1.5 rounded-md text-xs font-medium hover:bg-red-100 transition-colors border border-red-100"><X className="w-3 h-3" /> Retour Vue Globale</button>)}
         </div>
 
         {/* --- Barre d'actions mobile : tout regroupé derrière un bouton "Filtres" --- */}
@@ -1438,7 +1481,7 @@ function MigrationDashboard() {
             </div>
           )}
           {(selectedMonth || showPlanning) && (
-            <button onClick={() => { setSelectedMonth(null); setShowPlanning(false); }} className="w-full flex items-center justify-center gap-1 bg-red-50 text-red-600 px-3 py-2 rounded-md text-xs font-medium hover:bg-red-100 transition-colors border border-red-100"><X className="w-3 h-3" /> Retour Vue Globale</button>
+            <button onClick={() => { setSelectedMonth(null); setShowPlanning(false); setChartMode('months'); }} className="w-full flex items-center justify-center gap-1 bg-red-50 text-red-600 px-3 py-2 rounded-md text-xs font-medium hover:bg-red-100 transition-colors border border-red-100"><X className="w-3 h-3" /> Retour Vue Globale</button>
           )}
         </div>
       )}
@@ -1462,22 +1505,23 @@ function MigrationDashboard() {
       {activeView === 'dashboard' && (
       <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-        <div onClick={() => { setShowPlanning(!showPlanning); setSelectedMonth(null); }} className={`px-4 py-3 rounded-xl shadow-sm border flex flex-col justify-center cursor-pointer transition-all duration-200 gap-3 ${showPlanning ? 'bg-indigo-50 border-indigo-200 ring-2 ring-indigo-100' : 'bg-white border-slate-200/70 hover:bg-slate-50'}`}>
+        <div onClick={() => { setShowPlanning(!showPlanning); setSelectedMonth(null); setChartMode('months'); }} className={`px-4 py-3 rounded-xl shadow-sm border flex flex-col justify-center cursor-pointer transition-all duration-200 gap-3 ${showPlanning ? 'bg-indigo-50 border-indigo-200 ring-2 ring-indigo-100' : 'bg-white border-slate-200/70 hover:bg-slate-50'}`}>
             <PipeProgress label="Prêt pour Mise en Place" count={planningCount} colorClass="text-indigo-600" barColor="bg-indigo-500" />
             <PipeProgress label="Prêt pour Analyse" count={analysisPipeCount} colorClass="text-cyan-600" barColor="bg-cyan-500" />
         </div>
-        <KPICard title="Besoin Total (h)" value={kpiStats.besoin.toFixed(0)} subtext={selectedMonth ? "Sur le mois" : "Annuel"} icon={Users} colorClass={COLORS.text_besoin} active={!!selectedMonth} isLoading={isLoading}/>
-        <KPICard title="Capacité (h)" value={kpiStats.capacite.toFixed(0)} subtext="Planifiée" icon={Clock} colorClass={COLORS.text_capacite} active={!!selectedMonth} isLoading={isLoading}/>
-        <KPICard title="Taux Couverture" value={`${kpiStats.ratio.toFixed(0)}%`} subtext="Capa. / Besoin" icon={TrendingUp} colorClass={kpiStats.ratio >= 100 ? COLORS.text_ok : COLORS.text_danger} active={!!selectedMonth} isLoading={isLoading}/>
+        <KPICard title="Besoin Total (h)" value={kpiStats.besoin.toFixed(0)} subtext={chartMode !== 'months' ? "Restant" : "Annuel"} icon={Users} colorClass={COLORS.text_besoin} active={chartMode !== 'months'} isLoading={isLoading}/>
+        <KPICard title="Capacité (h)" value={kpiStats.capacite.toFixed(0)} subtext="Planifiée" icon={Clock} colorClass={COLORS.text_capacite} active={chartMode !== 'months'} isLoading={isLoading}/>
+        <KPICard title="Taux Couverture" value={`${kpiStats.ratio.toFixed(0)}%`} subtext="Capa. / Besoin" icon={TrendingUp} colorClass={kpiStats.ratio >= 100 ? COLORS.text_ok : COLORS.text_danger} active={chartMode !== 'months'} isLoading={isLoading}/>
       </div>
 
       <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200/70 mb-4">
         <div className="flex flex-col sm:flex-row items-center justify-between mb-4 gap-4">
-            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">
-                <button onClick={() => toggleViewMode('months')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${!selectedMonth ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Vue Annuelle (Mois)</button>
-                <button onClick={() => toggleViewMode('weeks')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${selectedMonth ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Vue Détaillée (Semaines)</button>
+            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg flex-wrap">
+                <button onClick={() => toggleViewMode('months')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${chartMode === 'months' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Vue Annuelle (Mois)</button>
+                <button onClick={() => toggleViewMode('weeks-month')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${chartMode === 'weeks-month' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Vue Détaillée (Semaines)</button>
+                <button onClick={() => toggleViewMode('weeks-all')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${chartMode === 'weeks-all' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Toutes les Semaines</button>
             </div>
-            {selectedMonth && (
+            {chartMode === 'weeks-month' && (
                 <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-200">
                     <span className="text-xs text-slate-500 font-medium">Mois :</span>
                     <select value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="text-sm border border-slate-200 rounded-md py-1 px-2 focus:ring-blue-500 bg-white">{availableMonths.map(m => (<option key={m} value={m}>{formatMonth(m)}</option>))}</select>
@@ -1502,27 +1546,27 @@ function MigrationDashboard() {
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={mainChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }} onClick={handleChartClick}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey={selectedMonth ? "label" : "month"} axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} dy={5} tickFormatter={(val) => { if (String(val).startsWith('S')) return val; return formatMonthShort(val); }} interval={0} />
+              <XAxis dataKey={chartMode === 'months' ? "month" : "label"} axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} dy={5} tickFormatter={(val) => { if (String(val).startsWith('S') || /^\d{4}-S\d+/.test(String(val))) return val; return formatMonthShort(val); }} interval={0} />
               <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} />
               <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(0,0,0,0.05)' }} />
-              <Bar stackId="a" dataKey="besoin" fill={COLORS.besoin} radius={[0, 0, 0, 0]} barSize={selectedMonth ? 30 : 16}>
+              <Bar stackId="a" dataKey="besoin" fill={COLORS.besoin} radius={[0, 0, 0, 0]} barSize={chartMode === 'weeks-month' ? 30 : chartMode === 'weeks-all' ? 12 : 16}>
                 {mainChartData.map((entry, i) => (<Cell key={i} fillOpacity={entry.isPast ? 0.3 : 1} />))}
               </Bar>
-              <Bar stackId="a" dataKey="besoin_encours" fill={COLORS.encours} radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16}>
+              <Bar stackId="a" dataKey="besoin_encours" fill={COLORS.encours} radius={[3, 3, 0, 0]} barSize={chartMode === 'weeks-month' ? 30 : chartMode === 'weeks-all' ? 12 : 16}>
                 {mainChartData.map((entry, i) => (<Cell key={i} fillOpacity={entry.isPast ? 0.3 : 1} />))}
               </Bar>
-              <Bar stackId="b" dataKey="capacite" fill={COLORS.capacite} radius={[3, 3, 0, 0]} barSize={selectedMonth ? 30 : 16}>
+              <Bar stackId="b" dataKey="capacite" fill={COLORS.capacite} radius={[3, 3, 0, 0]} barSize={chartMode === 'weeks-month' ? 30 : chartMode === 'weeks-all' ? 12 : 16}>
                 {mainChartData.map((entry, i) => (<Cell key={i} fillOpacity={entry.isPast ? 0.3 : 1} />))}
               </Bar>
             </ComposedChart>
           </ResponsiveContainer>
           )}
         </div>
-        {!selectedMonth && <p className="text-[10px] text-center text-slate-400 italic mt-1">Cliquez sur un mois pour voir le détail par semaine</p>}
-        {!selectedMonth && monthlyAggregatedData.some(m => m.isCurrentMonthPartial) && (
+        {chartMode === 'months' && <p className="text-[10px] text-center text-slate-400 italic mt-1">Cliquez sur un mois pour voir le détail par semaine</p>}
+        {chartMode === 'months' && monthlyAggregatedData.some(m => m.isCurrentMonthPartial) && (
           <p className="text-[10px] text-center text-slate-400 italic">Mois en cours : seule la capacité/besoin restant à partir d'aujourd'hui est comptabilisé.</p>
         )}
-        {selectedMonth && mainChartData.some(w => w.isPast) && (
+        {chartMode !== 'months' && mainChartData.some(w => w.isPast) && (
           <p className="text-[10px] text-center text-slate-400 italic mt-1">Semaines grisées : déjà passées, exclues des totaux ci-dessus.</p>
         )}
       </div>
