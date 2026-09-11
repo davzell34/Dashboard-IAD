@@ -85,9 +85,12 @@ const COLORS = {
 // --- THÈME "AURORA" (optionnel, activable) : palette et couleurs métier
 // alignées sur celles déjà utilisées (COLORS) pour ne pas changer le sens
 // des couleurs, seulement l'habillage visuel.
+// --- THÈME "SECIB" (optionnel, activable) : reprend la palette déjà validée
+// sur le CSM Dashboard (même famille d'outils internes, cohérence visuelle
+// entre les deux). Couleurs métier (COLORS) inchangées, seul l'habillage change.
 const AURORA_THEMES = {
-    light: { page: '#FBFAF8', card: '#FFFFFF', border: '#E7E4DC', text: '#171614', sub: '#6F6C63', accent: '#6D28D9', accentBg: '#F1EBFC', track: '#EDEAE2', hover: '#F3F1EB', alea: '#B45309', aleaBg: '#B4530918', handoff: '#DB2777', handoffBg: '#DB277718' },
-    dark: { page: '#0E0D12', card: '#17151C', border: '#28252F', text: '#EFEDF2', sub: '#8B8794', accent: '#A78BFA', accentBg: '#221B33', track: '#221F29', hover: '#1D1A24', alea: '#FBBF24', aleaBg: '#FBBF2422', handoff: '#F472B6', handoffBg: '#F472B622' }
+    light: { page: '#F4F5F7', card: '#FFFFFF', border: '#E1E3E8', text: '#1F2129', sub: '#6B6F7B', accent: '#304287', accentBg: '#E8EBF7', track: '#EEF0F4', hover: '#F7F8FA', alea: '#B5722E', aleaBg: '#DEA07C33', handoff: '#8B2E6B', handoffBg: '#8B2E6B18' },
+    dark: { page: '#1F2129', card: '#303441', border: '#3D414F', text: '#F0F1F4', sub: '#9497A3', accent: '#5A72C9', accentBg: '#2E3862', track: '#3D414F', hover: '#383C4A', alea: '#DEA07C', aleaBg: '#DEA07C22', handoff: '#E38BC0', handoffBg: '#E38BC022' }
 };
 
 const clerkPubKey = process.env.REACT_APP_CLERK_PUBLISHABLE_KEY;
@@ -847,7 +850,7 @@ function MigrationDashboard() {
   };
   const [migrationSortDir, setMigrationSortDir] = useState('asc');
   const [chartMode, setChartMode] = useState('weeks-all'); // 'months' | 'weeks-month' | 'weeks-all'
-  const effectiveTechName = (isAdmin && viewAsTech) ? viewAsTech : currentTechName;
+  const effectiveTechName = viewAsTech || currentTechName;
 
   const showToast = useCallback((message, type = 'success') => {
     setToast({ message, type });
@@ -2079,39 +2082,41 @@ function MigrationDashboard() {
                   : `Suivi des dossiers actifs assignés à ${effectiveTechName}, basé sur la catégorie du ticket.`}
               </p>
             </div>
-            {isAdmin && (
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="relative">
+            <div className="flex items-center gap-2 flex-wrap">
+              {isAdmin && (
+                <>
+                  <div className="relative">
+                    <button
+                      onClick={() => { setDateScopeDraft({ start: weightsConfig.date_range_start, end: weightsConfig.date_range_end }); setIsDateScopeOpen(o => !o); }}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-md hover:bg-slate-50 transition-colors"
+                      title="Élargir ou réduire la période affichée"
+                    >
+                      <Calendar size={13} /> Scope de dates
+                    </button>
+                    {isDateScopeOpen && (
+                      <DateScopePanel dateScopeDraft={dateScopeDraft} setDateScopeDraft={setDateScopeDraft} onApply={handleApplyDateScope} onClose={() => setIsDateScopeOpen(false)} isSaving={isSavingDateScope} />
+                    )}
+                  </div>
                   <button
-                    onClick={() => { setDateScopeDraft({ start: weightsConfig.date_range_start, end: weightsConfig.date_range_end }); setIsDateScopeOpen(o => !o); }}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-md hover:bg-slate-50 transition-colors"
-                    title="Élargir ou réduire la période affichée"
+                    onClick={handleQuickYearScope}
+                    disabled={isSavingDateScope}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-100 rounded-md hover:bg-blue-100 transition-colors disabled:opacity-50"
+                    title="Élargit le scope à 6 mois avant / 6 mois après aujourd'hui"
                   >
-                    <Calendar size={13} /> Scope de dates
+                    {isSavingDateScope ? <Loader size={13} className="animate-spin" /> : <CalendarClock size={13} />} Voir toute l'année
                   </button>
-                  {isDateScopeOpen && (
-                    <DateScopePanel dateScopeDraft={dateScopeDraft} setDateScopeDraft={setDateScopeDraft} onApply={handleApplyDateScope} onClose={() => setIsDateScopeOpen(false)} isSaving={isSavingDateScope} />
-                  )}
-                </div>
-                <button
-                  onClick={handleQuickYearScope}
-                  disabled={isSavingDateScope}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-100 rounded-md hover:bg-blue-100 transition-colors disabled:opacity-50"
-                  title="Élargit le scope à 6 mois avant / 6 mois après aujourd'hui"
-                >
-                  {isSavingDateScope ? <Loader size={13} className="animate-spin" /> : <CalendarClock size={13} />} Voir toute l'année
-                </button>
-                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Visualiser en tant que</label>
-                <select
-                  value={viewAsTech || ''}
-                  onChange={(e) => setViewAsTech(e.target.value || null)}
-                  className="text-sm border border-slate-200 rounded-md py-1.5 px-2 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >
-                  <option value="">Moi ({currentTechName})</option>
-                  {techList.map(tech => (<option key={tech} value={tech}>{tech}</option>))}
-                </select>
-              </div>
-            )}
+                </>
+              )}
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Visualiser en tant que</label>
+              <select
+                value={viewAsTech || ''}
+                onChange={(e) => setViewAsTech(e.target.value || null)}
+                className="text-sm border border-slate-200 rounded-md py-1.5 px-2 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="">Moi ({currentTechName})</option>
+                {techList.map(tech => (<option key={tech} value={tech}>{tech}</option>))}
+              </select>
+            </div>
           </div>
           {myMigrations.length > 0 && (
             <div className="flex items-center gap-1 mb-3 bg-slate-100/70 p-1 rounded-lg w-fit">
@@ -2125,13 +2130,13 @@ function MigrationDashboard() {
                 onClick={() => setUiThemeAndPersist('aurora-light')}
                 className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${uiTheme === 'aurora-light' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
               >
-                Aurora clair (aperçu)
+                Thème Secib clair
               </button>
               <button
                 onClick={() => setUiThemeAndPersist('aurora-dark')}
                 className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${uiTheme === 'aurora-dark' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
               >
-                Aurora sombre (aperçu)
+                Thème Secib sombre
               </button>
             </div>
           )}
