@@ -82,6 +82,14 @@ const COLORS = {
     text_ok: "text-emerald-600", text_danger: "text-red-600", text_neutral: "text-slate-600"
 };
 
+// --- THÈME "AURORA" (optionnel, activable) : palette et couleurs métier
+// alignées sur celles déjà utilisées (COLORS) pour ne pas changer le sens
+// des couleurs, seulement l'habillage visuel.
+const AURORA_THEMES = {
+    light: { page: '#FBFAF8', card: '#FFFFFF', border: '#E7E4DC', text: '#171614', sub: '#6F6C63', accent: '#6D28D9', accentBg: '#F1EBFC', track: '#EDEAE2', hover: '#F3F1EB', alea: '#B45309', aleaBg: '#B4530918', handoff: '#DB2777', handoffBg: '#DB277718' },
+    dark: { page: '#0E0D12', card: '#17151C', border: '#28252F', text: '#EFEDF2', sub: '#8B8794', accent: '#A78BFA', accentBg: '#221B33', track: '#221F29', hover: '#1D1A24', alea: '#FBBF24', aleaBg: '#FBBF2422', handoff: '#F472B6', handoffBg: '#F472B622' }
+};
+
 const clerkPubKey = process.env.REACT_APP_CLERK_PUBLISHABLE_KEY;
 
 // --- UTILITAIRES DE SECURITE ---
@@ -533,6 +541,59 @@ const MigrationRow = ({ migration, isExpanded, onToggle }) => {
     );
 };
 
+// --- THÈME AURORA : frise en barre de progression (aperçu) ---
+const MigrationStepperBar = ({ currentIndex, alea, accentColor, theme }) => {
+    const t = AURORA_THEMES[theme];
+    const segW = 100 / 5;
+    return (
+        <div style={{ position: 'relative', height: 20, background: t.track, borderRadius: 6, margin: '4px 0' }}>
+            <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${Math.max(currentIndex - 1, 0) * segW + segW / 2}%`, background: accentColor, opacity: 0.25, borderRadius: 6 }} />
+            {MIGRATION_STAGES.map((stage, i) => {
+                const stepNum = i + 1;
+                const done = stepNum <= currentIndex;
+                const StageIcon = stage.icon;
+                return (
+                    <div key={stage.key} title={stage.tooltip} style={{ position: 'absolute', left: `${i * segW + segW / 2}%`, top: '50%', transform: 'translate(-50%,-50%)', width: 20, height: 20, borderRadius: 6, background: done ? accentColor : t.track, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'help' }}>
+                        <StageIcon size={12} color={done ? '#fff' : t.sub} />
+                    </div>
+                );
+            })}
+        </div>
+    );
+};
+
+// --- THÈME AURORA : ligne de migration (aperçu — liste dense sans carte, frise en barre) ---
+const MigrationRowAurora = ({ migration, theme, isExpanded, onToggle }) => {
+    const t = AURORA_THEMES[theme];
+    const formatDate = (d) => d ? d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : null;
+    const accentColor = migration.alea ? t.alea : migration.livraisonDifferentTech ? t.handoff : t.accent;
+    return (
+        <div
+            onClick={onToggle}
+            style={{ padding: '12px 14px', borderTop: `1px solid ${t.border}`, cursor: 'pointer', background: 'transparent', transition: 'background .15s' }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = t.hover; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+        >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, gap: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: t.text, minWidth: 0 }}>
+                    {migration.dossierName} <span style={{ color: t.sub, fontWeight: 400, fontSize: 11 }}>n°{migration.numDossier}</span>
+                </div>
+                {migration.alea && <span style={{ fontSize: 10, fontWeight: 500, color: t.alea, background: t.aleaBg, padding: '2px 8px', borderRadius: 6, whiteSpace: 'nowrap' }}>{migration.alea}</span>}
+                {!migration.alea && migration.livraisonDifferentTech && <span style={{ fontSize: 10, fontWeight: 500, color: t.handoff, background: t.handoffBg, padding: '2px 8px', borderRadius: 6, whiteSpace: 'nowrap' }}>Passation</span>}
+            </div>
+            <MigrationStepperBar currentIndex={migration.stageIndex} alea={migration.alea} accentColor={accentColor} theme={theme} />
+            {isExpanded && (
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${t.border}`, fontSize: 11, color: t.sub, display: 'flex', flexWrap: 'wrap', gap: 14 }}>
+                    {migration.analysisDate && <span>Analyse : {formatDate(migration.analysisDate)}</span>}
+                    {migration.livraisonDate && <span>Planifié : {formatDate(migration.livraisonDate)}</span>}
+                    {migration.livraisonDifferentTech && <span style={{ color: t.handoff, fontWeight: 500 }}>Finalisation par : {migration.livraisonAssignee}</span>}
+                    {migration.casParticulier && <span style={{ color: '#DC2626', fontWeight: 500 }}>{migration.casParticulier.label}{migration.casParticulier.date ? ` (${formatDate(migration.casParticulier.date)})` : ''}</span>}
+                </div>
+            )}
+        </div>
+    );
+};
+
 
 const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeights, onToast }) => {
     const [isEditing, setIsEditing] = useState(false);
@@ -776,6 +837,14 @@ function MigrationDashboard() {
   const [expandedDossier, setExpandedDossier] = useState(null);
   const [migrationStageFilter, setMigrationStageFilter] = useState(null); // null = toutes les étapes
   const [migrationDisplayMode, setMigrationDisplayMode] = useState('grouped'); // 'grouped' | 'list'
+  const [uiTheme, setUiTheme] = useState(() => {
+      try { return (typeof window !== 'undefined' && window.localStorage.getItem('pilotageMigrations:uiTheme')) || 'default'; }
+      catch (e) { return 'default'; }
+  });
+  const setUiThemeAndPersist = (val) => {
+      setUiTheme(val);
+      try { if (typeof window !== 'undefined') window.localStorage.setItem('pilotageMigrations:uiTheme', val); } catch (e) { /* stockage indisponible */ }
+  };
   const [migrationSortDir, setMigrationSortDir] = useState('asc');
   const [chartMode, setChartMode] = useState('weeks-all'); // 'months' | 'weeks-month' | 'weeks-all'
   const effectiveTechName = (isAdmin && viewAsTech) ? viewAsTech : currentTechName;
@@ -2000,11 +2069,11 @@ function MigrationDashboard() {
       )}
 
       {activeView === 'mine' && (
-        <div>
+        <div style={uiTheme !== 'default' ? { background: AURORA_THEMES[uiTheme === 'aurora-dark' ? 'dark' : 'light'].page, borderRadius: 16, padding: 16, margin: '-4px' } : undefined}>
           <div className="mb-4 flex items-start justify-between gap-4 flex-wrap">
             <div>
-              <h2 className="text-base font-bold text-slate-800">Mes migrations en cours</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <h2 className={`text-base font-bold ${uiTheme !== 'default' ? '' : 'text-slate-800'}`} style={uiTheme !== 'default' ? { color: AURORA_THEMES[uiTheme === 'aurora-dark' ? 'dark' : 'light'].text } : undefined}>Mes migrations en cours</h2>
+              <p className={`text-xs mt-0.5 ${uiTheme !== 'default' ? '' : 'text-slate-500'}`} style={uiTheme !== 'default' ? { color: AURORA_THEMES[uiTheme === 'aurora-dark' ? 'dark' : 'light'].sub } : undefined}>
                 {effectiveTechName === 'Inconnu'
                   ? "Votre nom n'a pas été reconnu dans l'équipe technique — vérifiez la correspondance avec votre profil Clerk."
                   : `Suivi des dossiers actifs assignés à ${effectiveTechName}, basé sur la catégorie du ticket.`}
@@ -2044,6 +2113,28 @@ function MigrationDashboard() {
               </div>
             )}
           </div>
+          {myMigrations.length > 0 && (
+            <div className="flex items-center gap-1 mb-3 bg-slate-100/70 p-1 rounded-lg w-fit">
+              <button
+                onClick={() => setUiThemeAndPersist('default')}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${uiTheme === 'default' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                Thème par défaut
+              </button>
+              <button
+                onClick={() => setUiThemeAndPersist('aurora-light')}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${uiTheme === 'aurora-light' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                Aurora clair (aperçu)
+              </button>
+              <button
+                onClick={() => setUiThemeAndPersist('aurora-dark')}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${uiTheme === 'aurora-dark' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                Aurora sombre (aperçu)
+              </button>
+            </div>
+          )}
           {myMigrations.length > 0 && (
             <div className="flex items-center gap-1 mb-3 bg-slate-100/70 p-1 rounded-lg w-fit">
               <button
@@ -2098,21 +2189,55 @@ function MigrationDashboard() {
             </div>
           ) : migrationDisplayMode === 'grouped' ? (
             <div className="space-y-4">
-              {groupedMigrations.map(group => (
-                <div key={group.key} className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
-                  <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-                    <p className="text-xs font-bold text-slate-600">{group.label}</p>
-                    <span className="text-[10px] text-slate-400">{group.items.length}</span>
+              {groupedMigrations.map(group => {
+                if (uiTheme !== 'default') {
+                  const t = AURORA_THEMES[uiTheme === 'aurora-dark' ? 'dark' : 'light'];
+                  return (
+                    <div key={group.key} style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 14, overflow: 'hidden' }}>
+                      <div style={{ padding: '8px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: `1px solid ${t.border}` }}>
+                        <p style={{ fontSize: 12, fontWeight: 500, color: t.text, margin: 0 }}>{group.label}</p>
+                        <span style={{ fontSize: 10, color: t.sub }}>{group.items.length}</span>
+                      </div>
+                      {group.items.map(m => (
+                        <MigrationRowAurora
+                          key={m.numDossier}
+                          migration={m}
+                          theme={uiTheme === 'aurora-dark' ? 'dark' : 'light'}
+                          isExpanded={expandedDossier === m.numDossier}
+                          onToggle={() => setExpandedDossier(expandedDossier === m.numDossier ? null : m.numDossier)}
+                        />
+                      ))}
+                    </div>
+                  );
+                }
+                return (
+                  <div key={group.key} className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
+                    <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                      <p className="text-xs font-bold text-slate-600">{group.label}</p>
+                      <span className="text-[10px] text-slate-400">{group.items.length}</span>
+                    </div>
+                    {group.items.map(m => (
+                      <MigrationRow
+                        key={m.numDossier}
+                        migration={m}
+                        isExpanded={expandedDossier === m.numDossier}
+                        onToggle={() => setExpandedDossier(expandedDossier === m.numDossier ? null : m.numDossier)}
+                      />
+                    ))}
                   </div>
-                  {group.items.map(m => (
-                    <MigrationRow
-                      key={m.numDossier}
-                      migration={m}
-                      isExpanded={expandedDossier === m.numDossier}
-                      onToggle={() => setExpandedDossier(expandedDossier === m.numDossier ? null : m.numDossier)}
-                    />
-                  ))}
-                </div>
+                );
+              })}
+            </div>
+          ) : uiTheme !== 'default' ? (
+            <div style={{ background: AURORA_THEMES[uiTheme === 'aurora-dark' ? 'dark' : 'light'].card, border: `1px solid ${AURORA_THEMES[uiTheme === 'aurora-dark' ? 'dark' : 'light'].border}`, borderRadius: 14, overflow: 'hidden' }}>
+              {displayedMigrations.map(m => (
+                <MigrationRowAurora
+                  key={m.numDossier}
+                  migration={m}
+                  theme={uiTheme === 'aurora-dark' ? 'dark' : 'light'}
+                  isExpanded={expandedDossier === m.numDossier}
+                  onToggle={() => setExpandedDossier(expandedDossier === m.numDossier ? null : m.numDossier)}
+                />
               ))}
             </div>
           ) : (
