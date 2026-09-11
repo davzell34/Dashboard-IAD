@@ -414,7 +414,7 @@ const MigrationTimelineMini = ({ currentIndex, alea, casParticulier, compact, li
                         <React.Fragment key={stage.key}>
                             <div className="flex flex-col items-center gap-1 shrink-0" title={tooltipText}>
                                 <div className={`${circleSize} rounded-full flex items-center justify-center transition-colors cursor-help ${
-                                    isHandoff ? 'bg-fuchsia-500 ring-4 ring-fuchsia-100' :
+                                    isHandoff ? 'bg-slate-900 ring-4 ring-fuchsia-300' :
                                     isCurrent ? (alea ? 'bg-amber-100 ring-4 ring-amber-50' : 'bg-blue-600 ring-4 ring-blue-100') :
                                     isDone ? 'bg-blue-500' : 'bg-white border-2 border-dashed border-slate-200'
                                 }`}>
