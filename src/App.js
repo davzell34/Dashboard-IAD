@@ -414,7 +414,7 @@ const MigrationTimelineMini = ({ currentIndex, alea, casParticulier, compact, li
                         <React.Fragment key={stage.key}>
                             <div className="flex flex-col items-center gap-1 shrink-0" title={tooltipText}>
                                 <div className={`${circleSize} rounded-full flex items-center justify-center transition-colors cursor-help ${
-                                    isHandoff ? 'bg-indigo-500 ring-4 ring-indigo-100' :
+                                    isHandoff ? 'bg-fuchsia-500 ring-4 ring-fuchsia-100' :
                                     isCurrent ? (alea ? 'bg-amber-100 ring-4 ring-amber-50' : 'bg-blue-600 ring-4 ring-blue-100') :
                                     isDone ? 'bg-blue-500' : 'bg-white border-2 border-dashed border-slate-200'
                                 }`}>
@@ -424,7 +424,7 @@ const MigrationTimelineMini = ({ currentIndex, alea, casParticulier, compact, li
                                         <StageIcon size={iconSize} className={isHandoff ? 'text-white' : isCurrent ? (alea ? 'text-amber-700' : 'text-white') : 'text-slate-300'} />
                                     )}
                                 </div>
-                                {!compact && <span className={`text-[10px] font-medium whitespace-nowrap ${isHandoff ? 'text-indigo-600' : isCurrent ? 'text-slate-800' : isDone ? 'text-blue-500' : 'text-slate-300'}`}>{stage.label}</span>}
+                                {!compact && <span className={`text-[10px] font-medium whitespace-nowrap ${isHandoff ? 'text-fuchsia-600' : isCurrent ? 'text-slate-800' : isDone ? 'text-blue-500' : 'text-slate-300'}`}>{stage.label}</span>}
                             </div>
                             {i < MIGRATION_STAGES.length - 1 && (
                                 <div className="flex-1 mx-1 rounded-full" style={{ height: '2px', minWidth: '12px', marginTop: topOffset, backgroundColor: stepNum < currentIndex ? '#93C5FD' : '#EAECF0' }} />
@@ -491,7 +491,7 @@ const MigrationRow = ({ migration, isExpanded, onToggle }) => {
                         {migration.analysisDate && <span>Analyse : {formatDate(migration.analysisDate)}</span>}
                         {migration.livraisonDate && <span>Planifié : {formatDate(migration.livraisonDate)}</span>}
                         {migration.livraisonDifferentTech && (
-                            <span className="text-indigo-600 font-medium">Finalisation par : {migration.livraisonAssignee}</span>
+                            <span className="text-fuchsia-600 font-medium">Finalisation par : {migration.livraisonAssignee}</span>
                         )}
                         {migration.casParticulier && (
                             <span className="text-red-600 font-medium">
