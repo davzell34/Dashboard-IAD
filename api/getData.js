@@ -205,12 +205,65 @@ export default async function handler(request, response) {
             ticketNotesRows = await runQuery(conn, sqlNotes, iadIncidentIds);
         }
 
+        // --- REQUÊTE 5 : RELANCES (priorité de relance client, vue "Relances" du dashboard) ---
+        // Contrairement aux requêtes 1/2 (V_EVENEMENT_TECHNIQUE / V_TICKETS_SERVICE_TECHNIQUE,
+        // scopées au workflow de migration), on interroge ici directement
+        // SEPTEO_SHARE.POLE_AVOCAT.V_TICKET pour récupérer les champs de suivi
+        // de relance (nombre de relances, statut, date de dernier message) qui
+        // n'existent pas dans les vues "service technique". Même filtre
+        // technicien (TIC_KPI_EMPLOYEE_RESP_NAME) que le reste du dashboard,
+        // pour rester cohérent avec l'équipe suivie ici.
+        // HYPOTHÈSES À VALIDER EN CONSOLE (cf. conversation) :
+        //  - le pattern ILIKE '%attente%client%' sur TIC_KPI_STATUS pour détecter
+        //    un statut "attente client" (valeurs réelles non confirmées)
+        //  - la pondération du score (JOURS_SANS_MAJ x1, RELANCES x5, +10 si attente client)
+        const filtreTechsRelances = `AND (${techLastNames.map(() => 'TIC_KPI_EMPLOYEE_RESP_NAME ILIKE ?').join(' OR ')})`;
+        const techBindsRelances = techLastNames.map(name => `%${name}%`);
+
+        const sqlRelances = `
+            WITH parametre AS (
+                SELECT TO_DATE(?) AS DATE_DEBUT, CURRENT_DATE() AS DATE_REF
+            ),
+            tickets AS (
+                SELECT
+                    TO_VARCHAR(t.TICKET_ID::INTEGER)   AS TICKET_ID,
+                    t.CUSTOMER_NAME                    AS CABINET,
+                    t.TIC_KPI_REASON                   AS MOTIF,
+                    t.TIC_KPI_PRIORITY                 AS PRIORITE,
+                    t.TIC_KPI_STATUS                   AS STATUT,
+                    t.TIC_KPI_EMPLOYEE_RESP_NAME        AS TECHNICIEN,
+                    t.TIC_KPI_CONTACT_NAME              AS CONTACT_CLIENT,
+                    COALESCE(t.TIC_KPI_NUMBER_DUNNING, 0) AS RELANCES,
+                    GREATEST(DATEDIFF('day',
+                        COALESCE(t.TIC_KPI_STATUS_DATE, t.TIC_KPI_LAST_UPDATE, t.TIC_KPI_CREATION_DATE),
+                        p.DATE_REF), 0)                                    AS JOURS_SANS_MAJ,
+                    (t.TIC_KPI_STATUS ILIKE '%clot%' OR t.TIC_KPI_STATUS ILIKE '%résolu%'
+                     OR t.TIC_KPI_STATUS ILIKE '%fermé%' OR t.TIC_KPI_CLOSING_DATE IS NOT NULL) AS EST_CLOS,
+                    (t.TIC_KPI_STATUS ILIKE '%attente%client%')            AS ATTENTE_CLIENT
+                FROM SEPTEO_SHARE.POLE_AVOCAT.V_TICKET t
+                CROSS JOIN parametre p
+                WHERE t.TIC_KPI_CREATION_DATE >= p.DATE_DEBUT
+                ${filtreTechsRelances}
+            )
+            SELECT
+                TICKET_ID, CABINET, MOTIF, PRIORITE, STATUT, TECHNICIEN, CONTACT_CLIENT,
+                JOURS_SANS_MAJ, RELANCES, ATTENTE_CLIENT,
+                (JOURS_SANS_MAJ * 1) + (RELANCES * 5) + (CASE WHEN ATTENTE_CLIENT THEN 10 ELSE 0 END) AS SCORE_RELANCE
+            FROM tickets
+            WHERE NOT EST_CLOS
+            ORDER BY SCORE_RELANCE DESC
+            LIMIT 50
+        `;
+
+        const relancesRows = await runQuery(conn, sqlRelances, [rangeStart, ...techBindsRelances]);
+
         response.status(200).json({
             message: "Données filtrées récupérées ✅",
             backoffice: backofficeRows,
             encours: encoursRows,
             specialEvents: specialEventRows,
             ticketNotes: ticketNotesRows,
+            relances: relancesRows,
             dateRange: { start: rangeStart, end: rangeEnd }
         });
 
