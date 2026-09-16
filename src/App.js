@@ -834,6 +834,7 @@ function MigrationDashboard() {
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
   const [activeView, setActiveView] = useState('dashboard'); // 'dashboard' | 'mine' | 'relances'
   const [relanceSelection, setRelanceSelection] = useState(() => new Set());
+  const [relanceTechFilter, setRelanceTechFilter] = useState('Tous');
 
   const { getToken } = useAuth();
   const isAdmin = userEmail === ADMIN_EMAIL;
@@ -1727,6 +1728,26 @@ function MigrationDashboard() {
     return (relancesData || []).filter(r => relanceSelection.has(r.TICKET_ID));
   }, [relancesData, relanceSelection]);
 
+  // Filtre technicien de l'onglet Relances, indépendant du filtre technicien
+  // de la vue équipe (celui-là reste global au dashboard).
+  const filteredRelances = useMemo(() => {
+    if (relanceTechFilter === 'Tous') return relancesData || [];
+    return (relancesData || []).filter(r => normalizeTechName(r.TECHNICIEN, techList) === relanceTechFilter);
+  }, [relancesData, relanceTechFilter, techList]);
+
+  // Seuils d'alerte visuelle sur la ligne : rouge si urgence forte (plus de 2
+  // relances déjà faites, OU 60 jours et plus sans mise à jour), orange si
+  // 1 à 2 relances déjà faites (et pas déjà rouge par ailleurs).
+  const getRelanceRowClass = (r) => {
+    const relances = Number(r.RELANCES) || 0;
+    const joursSansMaj = Number(r.JOURS_SANS_MAJ) || 0;
+    const isRed = relances > 2 || joursSansMaj >= 60;
+    const isOrange = !isRed && relances >= 1 && relances <= 2;
+    if (isRed) return 'bg-red-100 hover:bg-red-200';
+    if (isOrange) return 'bg-orange-100 hover:bg-orange-200';
+    return 'hover:bg-slate-50';
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500 relative">
       <header className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200/70 shadow-sm">
@@ -2328,9 +2349,26 @@ function MigrationDashboard() {
               </button>
             )}
           </div>
-          {relancesData.length === 0 ? (
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
+            <div className="relative">
+              <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400 pointer-events-none" />
+              <select
+                value={relanceTechFilter}
+                onChange={(e) => setRelanceTechFilter(e.target.value)}
+                className="pl-7 pr-3 py-1.5 text-xs bg-white border border-slate-200 text-slate-700 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+              >
+                <option value="Tous">Tous les techs</option>
+                {techList.map(tech => (<option key={tech} value={tech}>{tech}</option>))}
+              </select>
+            </div>
+            <div className="flex items-center gap-3 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+              <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-300"></span> 1-2 relances</div>
+              <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-300"></span> +2 relances ou 60j+ sans MAJ</div>
+            </div>
+          </div>
+          {filteredRelances.length === 0 ? (
             <div className="bg-white p-8 rounded-xl border border-slate-200/80 text-center text-sm text-slate-400 italic">
-              {isLoading ? "Chargement..." : "Aucun ticket à relancer sur le scope de dates actuel."}
+              {isLoading ? "Chargement..." : "Aucun ticket à relancer sur ce filtre."}
             </div>
           ) : (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200/70 overflow-hidden">
@@ -2350,8 +2388,8 @@ function MigrationDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {relancesData.map((r) => (
-                      <tr key={r.TICKET_ID} className={`hover:bg-slate-50 transition-colors ${relanceSelection.has(r.TICKET_ID) ? 'bg-blue-50/50' : ''}`}>
+                    {filteredRelances.map((r) => (
+                      <tr key={r.TICKET_ID} className={`transition-colors ${relanceSelection.has(r.TICKET_ID) ? 'bg-blue-50/50' : getRelanceRowClass(r)}`}>
                         <td className="px-3 py-2">
                           <input
                             type="checkbox"
