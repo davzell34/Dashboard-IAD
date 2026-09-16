@@ -810,6 +810,7 @@ function MigrationDashboard() {
   const [encoursData, setEncoursData] = useState([]);
   const [specialEventsData, setSpecialEventsData] = useState([]);
   const [ticketNotesData, setTicketNotesData] = useState([]);
+  const [relancesData, setRelancesData] = useState([]);
   const [techList, setTechList] = useState(TECH_LIST_DEFAULT);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTech, setSelectedTech] = useState('Tous');
@@ -831,7 +832,8 @@ function MigrationDashboard() {
   const [isTeamManagerOpen, setIsTeamManagerOpen] = useState(false);
   const [newTechName, setNewTechName] = useState('');
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
-  const [activeView, setActiveView] = useState('dashboard'); // 'dashboard' | 'mine'
+  const [activeView, setActiveView] = useState('dashboard'); // 'dashboard' | 'mine' | 'relances'
+  const [relanceSelection, setRelanceSelection] = useState(() => new Set());
 
   const { getToken } = useAuth();
   const isAdmin = userEmail === ADMIN_EMAIL;
@@ -869,6 +871,7 @@ function MigrationDashboard() {
         setEncoursData(cached.encours || []);
         setSpecialEventsData(cached.specialEvents || []);
         setTicketNotesData(cached.ticketNotes || []);
+        setRelancesData(cached.relances || []);
         setLastSyncTime(new Date(cached.cachedAt));
         console.log("📍 Données métier chargées depuis le cache local.");
         return;
@@ -891,9 +894,10 @@ function MigrationDashboard() {
       if (json.encours) setEncoursData(json.encours || []);
       if (json.specialEvents) setSpecialEventsData(json.specialEvents || []);
       if (json.ticketNotes) setTicketNotesData(json.ticketNotes || []);
+      setRelancesData(json.relances || []);
 
       const cachedAt = Date.now();
-      writeCache(cacheKey, { backoffice: json.backoffice, encours: json.encours, specialEvents: json.specialEvents, ticketNotes: json.ticketNotes, cachedAt }, DATA_CACHE_TTL_MS);
+      writeCache(cacheKey, { backoffice: json.backoffice, encours: json.encours, specialEvents: json.specialEvents, ticketNotes: json.ticketNotes, relances: json.relances, cachedAt }, DATA_CACHE_TTL_MS);
 
       setLastSyncTime(new Date(cachedAt));
       console.log("📍 Données métier chargées !");
@@ -1684,6 +1688,45 @@ function MigrationDashboard() {
     return groupDefs.map(g => ({ ...g, items: buckets.get(g.key) || [] })).filter(g => g.items.length > 0);
   }, [displayedMigrations]);
 
+  // --- RELANCES : formatage du prompt à copier vers Copilot (Outlook / Copilot Chat) ---
+  const buildRelancePrompt = (rows) => {
+    const lignes = rows.map((r, i) => {
+      const parts = [`${i + 1}. Cabinet ${r.CABINET || 'Inconnu'}`];
+      if (r.CONTACT_CLIENT) parts.push(`contact ${r.CONTACT_CLIENT}`);
+      const details = [];
+      if (r.MOTIF) details.push(`motif : ${r.MOTIF}`);
+      if (r.JOURS_SANS_MAJ !== undefined && r.JOURS_SANS_MAJ !== null) details.push(`sans nouvelles depuis ${r.JOURS_SANS_MAJ} jours`);
+      if (r.RELANCES) details.push(`déjà relancé ${r.RELANCES} fois`);
+      return parts.join(' — ') + (details.length ? `\n   ${details.join(' — ')}` : '');
+    }).join('\n');
+
+    return `Prépare-moi des brouillons de relance pour les cabinets suivants,\nen t'appuyant sur mes derniers échanges mail avec chacun d'eux :\n\n${lignes}\n\nPour chaque cabinet : retrouve le fil de discussion correspondant,\nrédige un message de relance courtois qui mentionne le motif ci-dessus,\net laisse le brouillon en attente de mon envoi.`;
+  };
+
+  const copyRelancePrompt = async (rows) => {
+    if (!rows || rows.length === 0) return;
+    const text = buildRelancePrompt(rows);
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast(`Prompt copié (${rows.length} cabinet${rows.length > 1 ? 's' : ''}).`, 'success');
+    } catch (e) {
+      console.error("Erreur copie presse-papiers:", e);
+      showToast("Impossible de copier le prompt (presse-papiers indisponible).", 'error');
+    }
+  };
+
+  const toggleRelanceSelection = (ticketId) => {
+    setRelanceSelection(prev => {
+      const next = new Set(prev);
+      if (next.has(ticketId)) next.delete(ticketId); else next.add(ticketId);
+      return next;
+    });
+  };
+
+  const relanceSelectedRows = useMemo(() => {
+    return (relancesData || []).filter(r => relanceSelection.has(r.TICKET_ID));
+  }, [relancesData, relanceSelection]);
+
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500 relative">
       <header className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200/70 shadow-sm">
@@ -1812,6 +1855,13 @@ function MigrationDashboard() {
         >
           Mes migrations
           {myMigrations.length > 0 && <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px]">{myMigrations.length}</span>}
+        </button>
+        <button
+          onClick={() => setActiveView('relances')}
+          className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${activeView === 'relances' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          Relances
+          {relancesData.length > 0 && <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700 text-[10px]">{relancesData.length}</span>}
         </button>
       </div>
 
@@ -2255,6 +2305,84 @@ function MigrationDashboard() {
                   onToggle={() => setExpandedDossier(expandedDossier === m.numDossier ? null : m.numDossier)}
                 />
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeView === 'relances' && (
+        <div>
+          <div className="mb-4 flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <h2 className="text-base font-bold text-slate-800">Cabinets à relancer</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Tickets ouverts triés par priorité de relance (silence prolongé + relances déjà effectuées + statut "attente client"). Score interne, ajustable si besoin.
+              </p>
+            </div>
+            {relanceSelection.size > 0 && (
+              <button
+                onClick={() => copyRelancePrompt(relanceSelectedRows)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+              >
+                <Copy size={13} /> Copier le prompt ({relanceSelection.size})
+              </button>
+            )}
+          </div>
+          {relancesData.length === 0 ? (
+            <div className="bg-white p-8 rounded-xl border border-slate-200/80 text-center text-sm text-slate-400 italic">
+              {isLoading ? "Chargement..." : "Aucun ticket à relancer sur le scope de dates actuel."}
+            </div>
+          ) : (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200/70 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left text-slate-600">
+                  <thead className="text-xs text-slate-500 uppercase bg-slate-50/50 border-b border-slate-100">
+                    <tr>
+                      <th className="px-3 py-2 w-8"></th>
+                      <th className="px-3 py-2 font-semibold">Cabinet</th>
+                      <th className="px-3 py-2 font-semibold">Contact</th>
+                      <th className="px-3 py-2 font-semibold">Motif</th>
+                      <th className="px-3 py-2 font-semibold">Technicien</th>
+                      <th className="px-3 py-2 font-semibold text-right">Sans MAJ</th>
+                      <th className="px-3 py-2 font-semibold text-right">Relances</th>
+                      <th className="px-3 py-2 font-semibold text-center">Attente client</th>
+                      <th className="px-3 py-2 w-10"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {relancesData.map((r) => (
+                      <tr key={r.TICKET_ID} className={`hover:bg-slate-50 transition-colors ${relanceSelection.has(r.TICKET_ID) ? 'bg-blue-50/50' : ''}`}>
+                        <td className="px-3 py-2">
+                          <input
+                            type="checkbox"
+                            checked={relanceSelection.has(r.TICKET_ID)}
+                            onChange={() => toggleRelanceSelection(r.TICKET_ID)}
+                            className="cursor-pointer"
+                          />
+                        </td>
+                        <td className="px-3 py-2 font-medium text-slate-800 whitespace-nowrap">{r.CABINET}</td>
+                        <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{r.CONTACT_CLIENT || '—'}</td>
+                        <td className="px-3 py-2 text-slate-600 max-w-[260px] truncate" title={r.MOTIF}>{r.MOTIF || '—'}</td>
+                        <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{r.TECHNICIEN || '—'}</td>
+                        <td className="px-3 py-2 text-right font-medium whitespace-nowrap">{r.JOURS_SANS_MAJ} j</td>
+                        <td className="px-3 py-2 text-right whitespace-nowrap">{r.RELANCES || 0}</td>
+                        <td className="px-3 py-2 text-center">
+                          {r.ATTENTE_CLIENT && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-50 text-amber-700 border border-amber-100">Oui</span>}
+                        </td>
+                        <td className="px-3 py-2">
+                          <button
+                            onClick={() => copyRelancePrompt([r])}
+                            title="Copier le prompt de relance pour ce cabinet"
+                            className="text-slate-400 hover:text-blue-600 transition-colors"
+                          >
+                            <Copy size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
