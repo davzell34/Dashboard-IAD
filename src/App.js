@@ -74,12 +74,77 @@ const writeCache = (key, value, ttlMs) => {
     }
 };
 
+// --- DESIGN TOKENS (refonte graphique "SaaS premium éditorial") ---
+// Centralise la palette / typo / espacements demandés. Ces valeurs pilotent
+// à la fois les variables CSS injectées (pour les styles inline / arbitrary
+// values Tailwind) et les couleurs utilisées par le graphique Recharts
+// (qui a besoin de vraies valeurs hex, pas de classes Tailwind).
+const TOKENS = {
+    background: '#f7f4ee', surface: '#fffdf9', surfaceMuted: '#f4f6f7',
+    navy900: '#0b2545', navy800: '#12385d', navy700: '#1d4a73',
+    cobalt: '#2563eb', cobaltSoft: '#eaf2ff',
+    sage: '#67b58c', sageSoft: '#e9f6ef',
+    terracotta: '#d97757', terracottaSoft: '#fcede6',
+    warning: '#d97706', danger: '#dc4c4c',
+    text: '#132b4a', textSecondary: '#62748a',
+    border: '#dce4ea', borderSoft: '#e9edef'
+};
+
+const FONT_HEADING = '"Playfair Display", Georgia, serif';
+const FONT_UI = '"Inter", "Segoe UI", sans-serif';
+
+// Injecte une seule fois les polices Google Fonts + les variables CSS
+// (design tokens) dans le <head>, pour que tout le reste de l'app puisse
+// utiliser var(--color-...) via des classes Tailwind arbitrary-value
+// (ex: bg-[var(--color-surface)]) sans dupliquer les valeurs partout.
+const injectDesignSystem = () => {
+    if (typeof document === 'undefined') return;
+    if (document.getElementById('pilotage-migrations-design-tokens')) return;
+
+    const fontLink = document.createElement('link');
+    fontLink.rel = 'stylesheet';
+    fontLink.href = 'https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600;700&display=swap';
+    document.head.appendChild(fontLink);
+
+    const style = document.createElement('style');
+    style.id = 'pilotage-migrations-design-tokens';
+    style.textContent = `
+        :root {
+            --color-background: ${TOKENS.background};
+            --color-surface: ${TOKENS.surface};
+            --color-surface-muted: ${TOKENS.surfaceMuted};
+            --color-navy-900: ${TOKENS.navy900};
+            --color-navy-800: ${TOKENS.navy800};
+            --color-navy-700: ${TOKENS.navy700};
+            --color-cobalt: ${TOKENS.cobalt};
+            --color-cobalt-soft: ${TOKENS.cobaltSoft};
+            --color-sage: ${TOKENS.sage};
+            --color-sage-soft: ${TOKENS.sageSoft};
+            --color-terracotta: ${TOKENS.terracotta};
+            --color-terracotta-soft: ${TOKENS.terracottaSoft};
+            --color-warning: ${TOKENS.warning};
+            --color-danger: ${TOKENS.danger};
+            --color-text: ${TOKENS.text};
+            --color-text-secondary: ${TOKENS.textSecondary};
+            --color-border: ${TOKENS.border};
+            --color-border-soft: ${TOKENS.borderSoft};
+            --font-heading: ${FONT_HEADING};
+            --font-ui: ${FONT_UI};
+        }
+        body { font-family: var(--font-ui); }
+    `;
+    document.head.appendChild(style);
+};
+
+// Couleurs métier du graphique + badges, alignées sur les design tokens :
+// besoin -> cobalt, en cours -> terracotta, capacité -> sauge (mapping
+// explicitement demandé pour le graphique de planification).
 const COLORS = {
-    besoin: "#60a5fa", encours: "#fb923c", capacite: "#34d399",
-    ok: "#34d399", danger: "#f87171",
-    bg_besoin: "bg-blue-400", bg_encours: "bg-orange-400", bg_capacite: "bg-emerald-400",
-    text_besoin: "text-blue-600", text_encours: "text-orange-600", text_capacite: "text-emerald-600",
-    text_ok: "text-emerald-600", text_danger: "text-red-600", text_neutral: "text-slate-600"
+    besoin: TOKENS.cobalt, encours: TOKENS.terracotta, capacite: TOKENS.sage,
+    ok: TOKENS.sage, danger: TOKENS.danger,
+    bg_besoin: "bg-[var(--color-cobalt)]", bg_encours: "bg-[var(--color-terracotta)]", bg_capacite: "bg-[var(--color-sage)]",
+    text_besoin: "text-[var(--color-cobalt)]", text_encours: "text-[var(--color-terracotta)]", text_capacite: "text-[var(--color-sage)]",
+    text_ok: "text-[var(--color-sage)]", text_danger: "text-[var(--color-danger)]", text_neutral: "text-[var(--color-text-secondary)]"
 };
 
 // --- THÈME "AURORA" (optionnel, activable) : palette et couleurs métier
@@ -328,7 +393,7 @@ const Toast = ({ toast, onClose }) => {
     if (!toast) return null;
     const isError = toast.type === 'error';
     return (
-        <div className={`fixed bottom-4 right-4 z-[100] max-w-sm w-full sm:w-auto flex items-start gap-2 px-4 py-3 rounded-lg shadow-xl border animate-in fade-in slide-in-from-bottom-4 duration-200 ${isError ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+        <div className={`fixed bottom-4 right-4 z-[100] max-w-sm w-full sm:w-auto flex items-start gap-2 px-4 py-3 rounded-lg shadow-xl border animate-in fade-in slide-in-from-bottom-4 duration-200 ${isError ? 'bg-red-50 border-red-200 text-red-700' : 'bg-[var(--color-sage-soft)] border-[var(--color-sage)]/30 text-[var(--color-sage)]'}`}>
             {isError ? <AlertCircle size={16} className="shrink-0 mt-0.5" /> : <CheckCircle2 size={16} className="shrink-0 mt-0.5" />}
             <p className="text-xs font-medium leading-snug">{toast.message}</p>
             <button onClick={onClose} className="ml-auto text-current opacity-60 hover:opacity-100"><X size={14} /></button>
@@ -343,22 +408,22 @@ const Skeleton = ({ className = "", style }) => (
 
 // --- PANNEAU : SCOPE DE DATES (admin) ---
 const DateScopePanel = ({ dateScopeDraft, setDateScopeDraft, onApply, onClose, isSaving }) => (
-    <div className="absolute right-0 mt-2 w-72 bg-white border border-slate-200 rounded-lg shadow-xl z-50 p-4 animate-in fade-in slide-in-from-top-2 duration-150">
-        <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-3">Scope de dates (Snowflake)</h4>
+    <div className="absolute left-full ml-2 top-0 w-72 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg shadow-xl z-50 p-4 animate-in fade-in slide-in-from-left-2 duration-150">
+        <h4 className="text-xs font-bold uppercase tracking-wide text-[var(--color-text-secondary)] mb-3">Scope de dates (Snowflake)</h4>
         <div className="space-y-2 mb-3">
-            <label className="block text-xs text-slate-600">
+            <label className="block text-xs text-[var(--color-text-secondary)]">
                 Début
-                <input type="date" value={dateScopeDraft.start || ''} onChange={(e) => setDateScopeDraft(d => ({ ...d, start: e.target.value }))} className="mt-1 w-full text-sm border border-slate-200 rounded-md py-1.5 px-2 focus:ring-1 focus:ring-blue-500 outline-none" />
+                <input type="date" value={dateScopeDraft.start || ''} onChange={(e) => setDateScopeDraft(d => ({ ...d, start: e.target.value }))} className="mt-1 w-full text-sm border border-[var(--color-border)] rounded-md py-1.5 px-2 focus:ring-1 focus:ring-[var(--color-cobalt)] outline-none" />
             </label>
-            <label className="block text-xs text-slate-600">
+            <label className="block text-xs text-[var(--color-text-secondary)]">
                 Fin
-                <input type="date" value={dateScopeDraft.end || ''} onChange={(e) => setDateScopeDraft(d => ({ ...d, end: e.target.value }))} className="mt-1 w-full text-sm border border-slate-200 rounded-md py-1.5 px-2 focus:ring-1 focus:ring-blue-500 outline-none" />
+                <input type="date" value={dateScopeDraft.end || ''} onChange={(e) => setDateScopeDraft(d => ({ ...d, end: e.target.value }))} className="mt-1 w-full text-sm border border-[var(--color-border)] rounded-md py-1.5 px-2 focus:ring-1 focus:ring-[var(--color-cobalt)] outline-none" />
             </label>
         </div>
-        <p className="text-[10px] text-slate-400 mb-3">Réduit ou élargit le volume de données remonté depuis Snowflake. Recharge les données après sauvegarde.</p>
+        <p className="text-[10px] text-[var(--color-text-secondary)] mb-3">Réduit ou élargit le volume de données remonté depuis Snowflake. Recharge les données après sauvegarde.</p>
         <div className="flex justify-end gap-2">
-            <button onClick={onClose} className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-md transition-colors">Annuler</button>
-            <button onClick={() => onApply()} disabled={isSaving} className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-md font-bold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1">
+            <button onClick={onClose} className="px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-muted)] rounded-md transition-colors">Annuler</button>
+            <button onClick={() => onApply()} disabled={isSaving} className="px-3 py-1.5 text-xs bg-[var(--color-cobalt)] text-white rounded-md font-bold hover:opacity-90 transition-colors disabled:opacity-50 flex items-center gap-1">
                 {isSaving ? <Loader size={12} className="animate-spin" /> : <Save size={12} />} Appliquer
             </button>
         </div>
@@ -367,16 +432,16 @@ const DateScopePanel = ({ dateScopeDraft, setDateScopeDraft, onApply, onClose, i
 
 // --- PANNEAU : GESTION DE L'ÉQUIPE (admin) ---
 const TeamManagerPanel = ({ techList, newTechName, setNewTechName, onAdd, onRemove, onClose }) => (
-    <div className="absolute right-0 mt-2 w-72 bg-white border border-slate-200 rounded-lg shadow-xl z-50 p-4 animate-in fade-in slide-in-from-top-2 duration-150">
+    <div className="absolute left-full ml-2 top-0 w-72 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg shadow-xl z-50 p-4 animate-in fade-in slide-in-from-left-2 duration-150">
         <div className="flex items-center justify-between mb-3">
-            <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500">Équipe technique</h4>
-            <button onClick={onClose}><X size={14} className="text-slate-400 hover:text-slate-600" /></button>
+            <h4 className="text-xs font-bold uppercase tracking-wide text-[var(--color-text-secondary)]">Équipe technique</h4>
+            <button onClick={onClose}><X size={14} className="text-[var(--color-text-secondary)] hover:text-[var(--color-text)]" /></button>
         </div>
         <ul className="space-y-1 mb-3 max-h-40 overflow-y-auto">
             {techList.map(tech => (
-                <li key={tech} className="flex items-center justify-between text-xs bg-slate-50 border border-slate-100 rounded-md px-2 py-1.5">
-                    <span className="text-slate-700">{tech}</span>
-                    <button onClick={() => onRemove(tech)} title="Retirer" className="text-slate-400 hover:text-red-600"><Trash2 size={13} /></button>
+                <li key={tech} className="flex items-center justify-between text-xs bg-[var(--color-surface-muted)] border border-[var(--color-border-soft)] rounded-md px-2 py-1.5">
+                    <span className="text-[var(--color-text)]">{tech}</span>
+                    <button onClick={() => onRemove(tech)} title="Retirer" className="text-[var(--color-text-secondary)] hover:text-red-600"><Trash2 size={13} /></button>
                 </li>
             ))}
         </ul>
@@ -387,11 +452,11 @@ const TeamManagerPanel = ({ techList, newTechName, setNewTechName, onAdd, onRemo
                 onChange={(e) => setNewTechName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') onAdd(); }}
                 placeholder="Prénom NOM"
-                className="flex-1 text-xs border border-slate-200 rounded-md py-1.5 px-2 focus:ring-1 focus:ring-blue-500 outline-none"
+                className="flex-1 text-xs border border-[var(--color-border)] rounded-md py-1.5 px-2 focus:ring-1 focus:ring-[var(--color-cobalt)] outline-none"
             />
-            <button onClick={onAdd} className="px-2.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"><Plus size={14} /></button>
+            <button onClick={onAdd} className="px-2.5 bg-[var(--color-cobalt)] text-white rounded-md hover:opacity-90 transition-colors"><Plus size={14} /></button>
         </div>
-        <p className="text-[10px] text-slate-400 mt-2">Le nom doit correspondre au champ Responsable dans Snowflake pour être reconnu.</p>
+        <p className="text-[10px] text-[var(--color-text-secondary)] mt-2">Le nom doit correspondre au champ Responsable dans Snowflake pour être reconnu.</p>
     </div>
 );
 
@@ -425,20 +490,20 @@ const MigrationTimelineMini = ({ currentIndex, alea, casParticulier, compact, li
                         <React.Fragment key={stage.key}>
                             <div className="flex flex-col items-center gap-1 shrink-0" title={tooltipText}>
                                 <div className={`${circleSize} rounded-full flex items-center justify-center transition-colors cursor-help ${
-                                    isHandoff ? 'bg-slate-900 ring-4 ring-fuchsia-300' :
-                                    isCurrent ? (alea ? 'bg-amber-100 ring-4 ring-amber-50' : 'bg-blue-600 ring-4 ring-blue-100') :
-                                    isDone ? 'bg-blue-500' : 'bg-white border-2 border-dashed border-slate-200'
+                                    isHandoff ? 'bg-[var(--color-navy-900)] ring-4 ring-[var(--color-terracotta)]/25' :
+                                    isCurrent ? (alea ? 'bg-[var(--color-terracotta-soft)] ring-4 ring-[var(--color-terracotta)]/10' : 'bg-[var(--color-cobalt)] ring-4 ring-[var(--color-cobalt-soft)]') :
+                                    isDone ? 'bg-[var(--color-cobalt)]' : 'bg-[var(--color-surface)] border-2 border-dashed border-[var(--color-border)]'
                                 }`}>
                                     {isDone ? (
                                         <CheckCircle2 size={iconSize} className="text-white" />
                                     ) : (
-                                        <StageIcon size={iconSize} className={isHandoff ? 'text-white' : isCurrent ? (alea ? 'text-amber-700' : 'text-white') : 'text-slate-300'} />
+                                        <StageIcon size={iconSize} className={isHandoff ? 'text-white' : isCurrent ? (alea ? 'text-[var(--color-terracotta)]' : 'text-white') : 'text-slate-300'} />
                                     )}
                                 </div>
-                                {!compact && <span className={`text-[10px] font-medium whitespace-nowrap ${isHandoff ? 'text-fuchsia-600' : isCurrent ? 'text-slate-800' : isDone ? 'text-blue-500' : 'text-slate-300'}`}>{stage.label}</span>}
+                                {!compact && <span className={`text-[10px] font-medium whitespace-nowrap ${isHandoff ? 'text-[var(--color-terracotta)]' : isCurrent ? 'text-[var(--color-text)]' : isDone ? 'text-[var(--color-cobalt)]' : 'text-slate-300'}`}>{stage.label}</span>}
                             </div>
                             {i < MIGRATION_STAGES.length - 1 && (
-                                <div className="flex-1 mx-1 rounded-full" style={{ height: '2px', minWidth: '12px', marginTop: topOffset, backgroundColor: stepNum < currentIndex ? '#93C5FD' : '#EAECF0' }} />
+                                <div className="flex-1 mx-1 rounded-full" style={{ height: '2px', minWidth: '12px', marginTop: topOffset, backgroundColor: stepNum < currentIndex ? TOKENS.cobalt : TOKENS.borderSoft }} />
                             )}
                         </React.Fragment>
                     );
@@ -447,13 +512,13 @@ const MigrationTimelineMini = ({ currentIndex, alea, casParticulier, compact, li
             <div className={`${casSlotWidth} shrink-0 flex items-start`}>
                 {casParticulier && (
                     <>
-                        <div className="flex-1 mx-1" style={{ marginTop: topOffset, borderTop: '2px dashed #F87171' }} />
+                        <div className="flex-1 mx-1" style={{ marginTop: topOffset, borderTop: `2px dashed ${TOKENS.navy700}` }} />
                         <div className="flex flex-col items-center gap-1 shrink-0" title={`Cas particulier : ${casParticulier.label}${casParticulier.assignee ? ' — attribué à ' + casParticulier.assignee : ''}${casParticulier.date ? ' — ' + casParticulier.date.toLocaleDateString('fr-FR') : ''}`}>
-                            <div className={`${circleSize} rounded-full flex items-center justify-center bg-red-100 ring-4 ring-red-50 cursor-help`}>
-                                <CasIcon size={iconSize} className="text-red-600" />
+                            <div className={`${circleSize} rounded-full flex items-center justify-center bg-[var(--color-surface-muted)] ring-4 ring-[var(--color-navy-700)]/10 cursor-help`}>
+                                <CasIcon size={iconSize} className="text-[var(--color-navy-700)]" />
                             </div>
                             {/* La date du cas particulier reste visible même en mode compact (contrairement aux libellés des autres étapes) */}
-                            <span className="text-[10px] font-medium whitespace-nowrap text-red-600">{casParticulier.date ? casParticulier.date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : 'Cas part.'}</span>
+                            <span className="text-[10px] font-medium whitespace-nowrap text-[var(--color-navy-700)]">{casParticulier.date ? casParticulier.date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : 'Cas part.'}</span>
                         </div>
                     </>
                 )}
@@ -466,19 +531,19 @@ const MigrationTimelineMini = ({ currentIndex, alea, casParticulier, compact, li
 const MigrationRow = ({ migration, isExpanded, onToggle }) => {
     const formatDate = (d) => d ? d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : null;
     return (
-        <div className="border-b border-slate-100 last:border-b-0">
+        <div className="border-b border-[var(--color-border-soft)] last:border-b-0">
             {/* Grille à colonnes FIXES (nom | frise | aléa | chevron) : chaque
                 colonne garde toujours la même largeur, qu'elle soit vide ou
                 non, pour que la frise tombe au même endroit sur toutes les
                 lignes — contrairement à un flex où une colonne vide (pas
                 d'aléa) laissait plus de place à la frise que sur les lignes
                 qui en ont un. */}
-            <button onClick={onToggle} className="w-full grid grid-cols-[130px_1fr_90px_16px] sm:grid-cols-[190px_1fr_100px_16px] items-center gap-3 px-4 py-2.5 hover:bg-slate-50 transition-colors text-left">
+            <button onClick={onToggle} className="w-full grid grid-cols-[130px_1fr_90px_16px] sm:grid-cols-[190px_1fr_100px_16px] items-center gap-3 px-4 py-2.5 hover:bg-[var(--color-surface-muted)] transition-colors text-left">
                 <div className="min-w-0">
-                    <p className="text-xs font-bold text-slate-800 truncate">{migration.dossierName}</p>
+                    <p className="text-xs font-bold text-[var(--color-text)] truncate">{migration.dossierName}</p>
                     <div className="flex items-center gap-1.5 mt-0.5">
-                        <span className="text-[10px] font-semibold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded shrink-0">n°{migration.numDossier}</span>
-                        {migration.interlocuteur && <span className="text-[10px] text-slate-400 truncate">{migration.interlocuteur}</span>}
+                        <span className="text-[10px] font-semibold text-[var(--color-cobalt)] bg-[var(--color-cobalt-soft)] px-1.5 py-0.5 rounded shrink-0">n°{migration.numDossier}</span>
+                        {migration.interlocuteur && <span className="text-[10px] text-[var(--color-text-secondary)] truncate">{migration.interlocuteur}</span>}
                     </div>
                 </div>
                 <div className="min-w-0">
@@ -488,39 +553,39 @@ const MigrationRow = ({ migration, isExpanded, onToggle }) => {
                 </div>
                 <div className="hidden sm:flex min-w-0">
                     {migration.alea && (
-                        <span className="truncate px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase bg-amber-50 text-amber-700 border border-amber-100">{migration.alea}</span>
+                        <span className="truncate px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase bg-[var(--color-terracotta-soft)] text-[var(--color-terracotta)] border border-[var(--color-terracotta)]/20">{migration.alea}</span>
                     )}
                 </div>
-                <ChevronDown size={14} className={`shrink-0 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                <ChevronDown size={14} className={`shrink-0 text-[var(--color-text-secondary)] transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
             </button>
             {isExpanded && (
-                <div className="px-4 pb-4 pt-2 bg-slate-50/60 animate-in fade-in duration-150">
+                <div className="px-4 pb-4 pt-2 bg-[var(--color-surface-muted)] animate-in fade-in duration-150">
                     <div onClick={onToggle} className="cursor-pointer">
                         <MigrationTimelineMini currentIndex={migration.stageIndex} alea={migration.alea} casParticulier={migration.casParticulier} livraisonDifferentTech={migration.livraisonDifferentTech} livraisonAssignee={migration.livraisonAssignee} />
                     </div>
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 pt-3 border-t border-slate-200 text-[11px] text-slate-500">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 pt-3 border-t border-[var(--color-border)] text-[11px] text-[var(--color-text-secondary)]">
                         {migration.analysisDate && <span>Analyse : {formatDate(migration.analysisDate)}</span>}
                         {migration.livraisonDate && <span>Planifié : {formatDate(migration.livraisonDate)}</span>}
                         {migration.livraisonDifferentTech && (
-                            <span className="text-fuchsia-600 font-medium">Finalisation par : {migration.livraisonAssignee}</span>
+                            <span className="text-[var(--color-terracotta)] font-medium">Finalisation par : {migration.livraisonAssignee}</span>
                         )}
                         {migration.casParticulier && (
-                            <span className="text-red-600 font-medium">
+                            <span className="text-[var(--color-navy-700)] font-medium">
                                 {migration.casParticulier.label}{migration.casParticulier.assignee ? ` — ${migration.casParticulier.assignee}` : ''}{migration.casParticulier.date ? ` (${formatDate(migration.casParticulier.date)})` : ''}
                             </span>
                         )}
                     </div>
                     {migration.linkedTicket ? (
-                        <div className="mt-3 pt-3 border-t border-slate-200">
+                        <div className="mt-3 pt-3 border-t border-[var(--color-border)]">
                             <div className="flex items-center justify-between mb-2">
-                                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 flex items-center gap-1"><FileText size={11} /> Ticket lié</p>
+                                <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--color-text-secondary)] flex items-center gap-1"><FileText size={11} /> Ticket lié</p>
                                 {migration.linkedTicket.etat && (
-                                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-100 text-slate-600 border border-slate-200">{migration.linkedTicket.etat}</span>
+                                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border border-[var(--color-border)]">{migration.linkedTicket.etat}</span>
                                 )}
                             </div>
-                            <p className="text-xs font-medium text-slate-700 mb-1.5">{migration.linkedTicket.motif}</p>
-                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
-                                {migration.linkedTicket.categorie && <span>Catégorie : <span className="text-slate-700 font-medium">{migration.linkedTicket.categorie}</span></span>}
+                            <p className="text-xs font-medium text-[var(--color-text)] mb-1.5">{migration.linkedTicket.motif}</p>
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-[var(--color-text-secondary)]">
+                                {migration.linkedTicket.categorie && <span>Catégorie : <span className="text-[var(--color-text)] font-medium">{migration.linkedTicket.categorie}</span></span>}
                                 {migration.linkedTicket.creeLe && <span>Créé le : {formatDate(migration.linkedTicket.creeLe)}</span>}
                                 {migration.linkedTicket.derniereAction && <span>Dernière action : {formatDate(migration.linkedTicket.derniereAction)}</span>}
                                 {migration.linkedTicket.reporteLe && <span>Reporté au : {formatDate(migration.linkedTicket.reporteLe)}</span>}
@@ -528,15 +593,15 @@ const MigrationRow = ({ migration, isExpanded, onToggle }) => {
                                 {migration.linkedTicket.nbRappelsClient > 0 && <span>Rappels client : {migration.linkedTicket.nbRappelsClient}</span>}
                             </div>
                             {migration.linkedTicket.notes && (
-                                <div className="mt-2 pt-2 border-t border-slate-100 space-y-1.5 max-h-48 overflow-y-auto">
+                                <div className="mt-2 pt-2 border-t border-[var(--color-border-soft)] space-y-1.5 max-h-48 overflow-y-auto">
                                     {migration.linkedTicket.notes.split('\n---\n').filter(Boolean).map((note, i) => (
-                                        <p key={i} className="text-[11px] text-slate-600 bg-white border border-slate-200 rounded-md px-2 py-1.5 whitespace-pre-wrap">{note.trim()}</p>
+                                        <p key={i} className="text-[11px] text-[var(--color-text-secondary)] bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md px-2 py-1.5 whitespace-pre-wrap">{note.trim()}</p>
                                     ))}
                                 </div>
                             )}
                         </div>
                     ) : (
-                        <p className="mt-3 pt-3 border-t border-slate-200 text-[11px] text-slate-400 italic">Aucun ticket "[IAD] - Préparation Avocatmail" trouvé pour ce dossier.</p>
+                        <p className="mt-3 pt-3 border-t border-[var(--color-border)] text-[11px] text-[var(--color-text-secondary)] italic">Aucun ticket "[IAD] - Préparation Avocatmail" trouvé pour ce dossier.</p>
                     )}
                 </div>
             )}
@@ -638,33 +703,33 @@ const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeight
 
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 flex flex-col max-h-[90vh]">
-                <div className="bg-slate-50 px-5 py-4 border-b border-slate-100 flex justify-between items-center shrink-0">
-                    <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                        {isEditing ? <Settings className="w-5 h-5 text-purple-600" /> : <Info className="w-5 h-5 text-blue-600" />}
+            <div className="bg-[var(--color-surface)] rounded-[10px] shadow-2xl w-full max-w-lg overflow-hidden border border-[var(--color-border)] flex flex-col max-h-[90vh]">
+                <div className="bg-[var(--color-surface-muted)] px-5 py-4 border-b border-[var(--color-border-soft)] flex justify-between items-center shrink-0">
+                    <h3 className="font-bold text-[var(--color-text)] flex items-center gap-2">
+                        {isEditing ? <Settings className="w-5 h-5 text-[var(--color-cobalt)]" /> : <Info className="w-5 h-5 text-[var(--color-cobalt)]" />}
                         {isEditing ? "Mode Édition" : "Règles de Calcul"}
                     </h3>
-                    <button onClick={onClose}><X size={20} className="text-slate-400 hover:text-slate-600" /></button>
+                    <button onClick={onClose}><X size={20} className="text-[var(--color-text-secondary)] hover:text-[var(--color-text)]" /></button>
                 </div>
                 <div className="p-6 text-xs space-y-6 overflow-y-auto">
                     <div className="space-y-2">
-                        <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_besoin} flex items-center gap-2 border-b border-blue-100 pb-1`}>1. Besoin Planifié</h4>
-                        <ul className="list-disc pl-4 space-y-1 text-slate-600">
+                        <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_besoin} flex items-center gap-2 border-b border-[var(--color-cobalt)]/15 pb-1`}>1. Besoin Planifié</h4>
+                        <ul className="list-disc pl-4 space-y-1 text-[var(--color-text-secondary)]">
                             <li>Source : Calendrier (Snowflake).</li>
-                            <li>Calcul : Durée réelle, sinon <code className="bg-slate-100 px-1 rounded">1h + (Nb Users - 5) × 10min</code>.</li>
+                            <li>Calcul : Durée réelle, sinon <code className="bg-[var(--color-surface-muted)] px-1 rounded">1h + (Nb Users - 5) × 10min</code>.</li>
                         </ul>
                     </div>
                     <div className="space-y-2">
-                        <div className="flex justify-between items-center border-b border-orange-100 pb-1">
+                        <div className="flex justify-between items-center border-b border-[var(--color-terracotta)]/20 pb-1">
                             <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_encours} flex items-center gap-2`}>2. Tickets "En Cours"</h4>
                             {isAdmin && !isEditing && (
-                                <button onClick={() => setIsEditing(true)} className="flex items-center gap-1 text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded hover:bg-purple-200 transition-colors">
+                                <button onClick={() => setIsEditing(true)} className="flex items-center gap-1 text-[10px] bg-[var(--color-cobalt-soft)] text-[var(--color-cobalt)] px-2 py-0.5 rounded hover:opacity-80 transition-colors">
                                     <Settings size={12} /> Modifier
                                 </button>
                             )}
                         </div>
                         {isEditing ? (
-                            <div className="grid grid-cols-1 gap-2 bg-slate-50 p-3 rounded border border-slate-200">
+                            <div className="grid grid-cols-1 gap-2 bg-[var(--color-surface-muted)] p-3 rounded border border-[var(--color-border)]">
                                 {[
                                     { label: "Prêt / A planifier", key: "pret_mise_en_place" },
                                     { label: "Préparation Tenant", key: "preparation_tenant" },
@@ -675,13 +740,13 @@ const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeight
                                     { label: "Motif: Prépa Avocatmail", key: "prepa_avocatmail_motif" },
                                 ].map((item) => (
                                     <div key={item.key} className="flex justify-between items-center">
-                                        <span className="font-semibold text-slate-700">{item.label}</span>
-                                        <input type="number" step="0.05" value={tempWeights[item.key]} onChange={(e) => handleChange(item.key, e.target.value)} className="w-20 text-right text-xs p-1 border rounded focus:ring-2 focus:ring-purple-500 outline-none" />
+                                        <span className="font-semibold text-[var(--color-text)]">{item.label}</span>
+                                        <input type="number" step="0.05" value={tempWeights[item.key]} onChange={(e) => handleChange(item.key, e.target.value)} className="w-20 text-right text-xs p-1 border rounded focus:ring-2 focus:ring-[var(--color-cobalt)] outline-none" />
                                     </div>
                                 ))}
                             </div>
                         ) : (
-                            <ul className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1 ml-2 text-slate-600">
+                            <ul className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1 ml-2 text-[var(--color-text-secondary)]">
                                 <li>• Prêt / Planif : <b>{tempWeights.pret_mise_en_place} h</b></li>
                                 <li>• Prép. Tenant : <b>{tempWeights.preparation_tenant} h</b></li>
                                 <li>• Copie en cours : <b>{tempWeights.copie_en_cours} h</b></li>
@@ -692,21 +757,21 @@ const RulesModal = ({ isOpen, onClose, userEmail, currentWeights, onUpdateWeight
                         )}
                     </div>
                     <div className="space-y-2">
-                        <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_capacite} flex items-center gap-2 border-b border-emerald-100 pb-1`}>3. Capacité</h4>
-                        <ul className="list-disc pl-4 space-y-1 text-slate-600">
+                        <h4 className={`font-bold uppercase tracking-wider ${COLORS.text_capacite} flex items-center gap-2 border-b border-[var(--color-sage)]/25 pb-1`}>3. Capacité</h4>
+                        <ul className="list-disc pl-4 space-y-1 text-[var(--color-text-secondary)]">
                             <li>Source : Événements "Backoffice".</li>
                             <li>Calcul : Durée nette (moins les RDV clients).</li>
                         </ul>
                     </div>
                 </div>
-                <div className="bg-slate-50 px-5 py-3 border-t border-slate-100 flex justify-end gap-2 shrink-0">
+                <div className="bg-[var(--color-surface-muted)] px-5 py-3 border-t border-[var(--color-border-soft)] flex justify-end gap-2 shrink-0">
                     {isEditing ? (
                         <>
-                            <button onClick={() => { setIsEditing(false); setTempWeights(currentWeights); }} className="px-3 py-2 text-slate-600 hover:bg-slate-200 rounded transition-colors flex items-center gap-1"><RotateCcw size={14} /> Annuler</button>
-                            <button onClick={handleSave} className="px-4 py-2 bg-purple-600 text-white rounded-md text-xs font-bold hover:bg-purple-700 transition-colors flex items-center gap-1"><Save size={14} /> Enregistrer</button>
+                            <button onClick={() => { setIsEditing(false); setTempWeights(currentWeights); }} className="px-3 py-2 text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-muted)] rounded transition-colors flex items-center gap-1"><RotateCcw size={14} /> Annuler</button>
+                            <button onClick={handleSave} className="px-4 py-2 bg-[var(--color-cobalt)] text-white rounded-md text-xs font-bold hover:opacity-90 transition-colors flex items-center gap-1"><Save size={14} /> Enregistrer</button>
                         </>
                     ) : (
-                        <button onClick={onClose} className="px-4 py-2 bg-white border border-slate-300 rounded-md text-slate-700 text-xs font-bold hover:bg-slate-100 transition-colors">Fermer</button>
+                        <button onClick={onClose} className="px-4 py-2 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md text-[var(--color-text)] text-xs font-bold hover:bg-[var(--color-surface-muted)] transition-colors">Fermer</button>
                     )}
                 </div>
             </div>
@@ -721,19 +786,19 @@ const CustomTooltip = ({ active, payload, label }) => {
     const isPositive = dispo >= 0;
     const byTechEntries = data.byTech ? Object.entries(data.byTech).sort((a, b) => a[0].localeCompare(b[0])) : [];
     return (
-      <div className="bg-white p-3 border border-slate-200 shadow-xl rounded-lg text-xs min-w-[180px] max-w-[280px]">
-        <p className="font-bold text-slate-800 mb-2 border-b border-slate-100 pb-1">{data.weekSort !== undefined ? data.label : formatMonth(data.month)}</p>
+      <div className="bg-[var(--color-surface)] p-3 border border-[var(--color-border)] shadow-xl rounded-lg text-xs min-w-[180px] max-w-[280px]">
+        <p className="font-bold text-[var(--color-text)] mb-2 border-b border-[var(--color-border-soft)] pb-1">{data.weekSort !== undefined ? data.label : formatMonth(data.month)}</p>
         <div className="space-y-1">
             <div className={`flex justify-between items-center ${COLORS.text_besoin}`}><span>Besoin (Nouv) :</span><span className="font-bold">{data.besoin?.toFixed(1)} h</span></div>
             <div className={`flex justify-between items-center ${COLORS.text_encours}`}><span>Besoin (En cours) :</span><span className="font-bold">{data.besoin_encours?.toFixed(1)} h</span></div>
             <div className={`flex justify-between items-center ${COLORS.text_capacite}`}><span>Capacité Planifiée :</span><span className="font-bold">{data.capacite?.toFixed(1)} h</span></div>
         </div>
-        <div className={`mt-3 pt-2 border-t border-slate-100 flex justify-between items-center font-bold text-sm ${isPositive ? COLORS.text_ok : COLORS.text_danger}`}>
+        <div className={`mt-3 pt-2 border-t border-[var(--color-border-soft)] flex justify-between items-center font-bold text-sm ${isPositive ? COLORS.text_ok : COLORS.text_danger}`}>
             <span>DISPONIBLE :</span><span>{isPositive ? '+' : ''}{dispo.toFixed(1)} h</span>
         </div>
         {byTechEntries.length > 0 && (
-          <div className="mt-3 pt-2 border-t border-slate-100">
-            <div className="flex justify-between items-center text-[9px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">
+          <div className="mt-3 pt-2 border-t border-[var(--color-border-soft)]">
+            <div className="flex justify-between items-center text-[9px] font-bold uppercase tracking-wide text-[var(--color-text-secondary)] mb-1.5">
               <span>Technicien</span>
               <span className="flex items-center gap-1 shrink-0">
                 <span className={COLORS.text_capacite}>Capa.</span>
@@ -744,7 +809,7 @@ const CustomTooltip = ({ active, payload, label }) => {
             <div className="space-y-1 max-h-40 overflow-y-auto">
               {byTechEntries.map(([tech, t]) => (
                 <div key={tech} className="flex justify-between items-center gap-2">
-                  <span className="text-slate-600 truncate">{tech}</span>
+                  <span className="text-[var(--color-text-secondary)] truncate">{tech}</span>
                   <span className="font-medium shrink-0">
                     <span className={COLORS.text_capacite}>{t.capacite.toFixed(0)}h</span>
                     <span className="text-slate-300 mx-0.5">/</span>
@@ -761,46 +826,171 @@ const CustomTooltip = ({ active, payload, label }) => {
   return null;
 };
 
-const KPICard = ({ title, value, subtext, icon: Icon, colorClass, active, onClick, isLoading }) => (
-  <div onClick={onClick} className={`px-4 py-3 rounded-xl shadow-sm border transition-all duration-300 flex items-center justify-between ${active ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-100' : 'bg-white border-slate-200/70'} ${onClick ? 'cursor-pointer hover:bg-slate-50' : ''}`}>
-    <div>
-      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{title}</p>
-      {isLoading ? (
-        <Skeleton className="h-6 w-16 mt-1" />
-      ) : (
-        <div className="flex items-baseline gap-2">
-          <h3 className="text-xl font-bold text-slate-800">{value}</h3>
-          {subtext && <p className={`text-xs font-medium ${colorClass}`}>{subtext}</p>}
-        </div>
-      )}
+// --- TONE_STYLES : mapping centralisé "famille sémantique" -> classes
+// (texte, fond doux, anneau) sur les design tokens. Remplace l'ancienne
+// manipulation de chaînes (`.replace('600','100')`) qui supposait des
+// classes Tailwind natives (blue-600, etc.) — devenu invalide depuis le
+// passage à des classes arbitrary-value (`text-[var(--color-cobalt)]`).
+const TONE_STYLES = {
+    cobalt:     { text: 'text-[var(--color-cobalt)]',     bg: 'bg-[var(--color-cobalt-soft)]',     ring: 'ring-[var(--color-cobalt)]/20',     bar: 'bg-[var(--color-cobalt)]' },
+    sage:       { text: 'text-[var(--color-sage)]',       bg: 'bg-[var(--color-sage-soft)]',       ring: 'ring-[var(--color-sage)]/20',       bar: 'bg-[var(--color-sage)]' },
+    terracotta: { text: 'text-[var(--color-terracotta)]', bg: 'bg-[var(--color-terracotta-soft)]', ring: 'ring-[var(--color-terracotta)]/20', bar: 'bg-[var(--color-terracotta)]' },
+    danger:     { text: 'text-[var(--color-danger)]',     bg: 'bg-red-50',                          ring: 'ring-red-200',                       bar: 'bg-[var(--color-danger)]' },
+    navy:       { text: 'text-[var(--color-navy-700)]',   bg: 'bg-[var(--color-surface-muted)]',                       ring: 'ring-slate-200',                     bar: 'bg-[var(--color-navy-700)]' }
+};
+
+// --- MetricCard (ex-KPICard) : carte KPI restylée — valeur en sans-serif
+// gras (grande taille), libellé en petites capitales, icône dans un chip
+// de couleur douce assortie à la famille sémantique (`tone`).
+const KPICard = ({ title, value, subtext, icon: Icon, tone = 'cobalt', active, onClick, isLoading }) => {
+  const t = TONE_STYLES[tone] || TONE_STYLES.cobalt;
+  return (
+    <div onClick={onClick} className={`px-4 py-3 rounded-[10px] border transition-all duration-300 flex items-center justify-between ${active ? `${t.bg} border-[var(--color-border)] ring-1 ${t.ring}` : 'bg-[var(--color-surface)] border-[var(--color-border-soft)]'} shadow-[0_4px_16px_rgba(11,37,69,0.04)] ${onClick ? 'cursor-pointer hover:bg-[var(--color-surface-muted)]' : ''}`}>
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{title}</p>
+        {isLoading ? (
+          <Skeleton className="h-7 w-16 mt-1" />
+        ) : (
+          <div className="flex items-baseline gap-2">
+            <h3 className="text-[28px] font-bold leading-tight" style={{ color: 'var(--color-text)', fontFamily: 'var(--font-ui)' }}>{value}</h3>
+            {subtext && <p className={`text-xs font-medium ${t.text}`}>{subtext}</p>}
+          </div>
+        )}
+      </div>
+      <div className={`p-2.5 rounded-full ring-1 ring-inset ${t.ring} ${t.bg}`}><Icon className={`w-5 h-5 ${t.text}`} /></div>
     </div>
-    <div className={`p-2.5 rounded-full ring-1 ring-inset ${colorClass.replace('text-', 'ring-').replace('600', '100')} ${colorClass.replace('text-', 'bg-').replace('600', '50')}`}><Icon className={`w-5 h-5 ${colorClass}`} /></div>
-  </div>
-);
+  );
+};
 
 const SortableHeader = ({ label, sortKey, currentSort, onSort, align = 'left' }) => {
   const isSorted = currentSort.key === sortKey;
   return (
-    <th className={`px-2 py-2 font-semibold whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors group select-none text-${align}`} onClick={() => onSort(sortKey)}>
+    <th className={`px-2 py-2 font-semibold whitespace-nowrap cursor-pointer hover:bg-[var(--color-surface-muted)] transition-colors group select-none text-${align}`} onClick={() => onSort(sortKey)}>
       <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start'}`}>
         {label}
-        <span className="text-slate-400">{isSorted ? (currentSort.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : (<ArrowUpDown size={12} className="opacity-0 group-hover:opacity-50" />)}</span>
+        <span className="text-[var(--color-text-secondary)]">{isSorted ? (currentSort.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : (<ArrowUpDown size={12} className="opacity-0 group-hover:opacity-50" />)}</span>
       </div>
     </th>
   );
 };
 
-const PipeProgress = ({ label, count, colorClass, barColor }) => {
+const PipeProgress = ({ label, count, tone = 'cobalt' }) => {
+    const t = TONE_STYLES[tone] || TONE_STYLES.cobalt;
     const percentage = Math.min((count / 15) * 100, 100);
     return (
         <div className="flex flex-col w-full">
-            <div className="flex justify-between items-end mb-1"><span className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">{label}</span><span className={`text-sm font-bold ${colorClass}`}>{count}</span></div>
-            <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden"><div className={`h-full rounded-full transition-all duration-500 ease-out ${barColor}`} style={{ width: `${percentage}%` }} /></div>
+            <div className="flex justify-between items-end mb-1"><span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{label}</span><span className={`text-sm font-bold ${t.text}`}>{count}</span></div>
+            <div className="h-2 w-full rounded-full overflow-hidden" style={{ background: 'var(--color-border-soft)' }}><div className={`h-full rounded-full transition-all duration-500 ease-out ${t.bar}`} style={{ width: `${percentage}%` }} /></div>
         </div>
     );
 };
 
 // --- APPLICATION PRINCIPALE ---
+
+// --- SIDEBAR : navigation principale + filtre équipe + paramètres/aide ---
+// Remplace l'ancienne barre d'onglets en pilule + les icônes d'action du
+// header. Fixe, fond navy, largeur ~200px (repliée sous lg, cf. classe
+// hidden lg:flex sur le conteneur appelant).
+const SidebarNavItem = ({ icon: Icon, label, active, onClick, count }) => (
+    <button
+        onClick={onClick}
+        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-[8px] text-sm font-medium transition-colors ${
+            active ? 'bg-[var(--color-navy-700)] text-white' : 'text-slate-300 hover:bg-[var(--color-navy-800)] hover:text-white'
+        }`}
+        style={active ? { boxShadow: `inset 3px 0 0 ${TOKENS.cobalt}` } : undefined}
+    >
+        <Icon size={16} className={active ? 'text-white' : 'text-[var(--color-text-secondary)]'} />
+        <span className="flex-1 text-left">{label}</span>
+        {typeof count === 'number' && count > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold" style={{ background: TOKENS.cobalt, color: '#fff' }}>{count}</span>
+        )}
+    </button>
+);
+
+const Sidebar = ({
+    activeView, setActiveView, myMigrationsCount, relancesCount,
+    isAdmin, techList, selectedTech, setSelectedTech,
+    isTeamManagerOpen, setIsTeamManagerOpen, newTechName, setNewTechName, handleAddTech, handleRemoveTech,
+    isDateScopeOpen, setIsDateScopeOpen, dateScopeDraft, setDateScopeDraft, handleApplyDateScope, isSavingDateScope, weightsConfig,
+    setIsRulesModalOpen
+}) => (
+    <aside
+        className="hidden lg:flex flex-col shrink-0 relative overflow-hidden"
+        style={{ width: 208, background: `linear-gradient(180deg, ${TOKENS.navy900} 0%, ${TOKENS.navy800} 100%)` }}
+    >
+        <div className="px-4 pt-5 pb-4">
+            <p className="text-[11px] uppercase tracking-wider text-[var(--color-text-secondary)] font-semibold">Septeo Solutions Avocats</p>
+            <h1 className="mt-0.5 leading-tight" style={{ fontFamily: 'var(--font-heading)', fontSize: 22, fontWeight: 700, color: '#fff' }}>Pilotage<br/>Migrations</h1>
+        </div>
+
+        <nav className="px-3 space-y-1 mt-2">
+            <SidebarNavItem icon={Activity} label="Vue équipe" active={activeView === 'dashboard'} onClick={() => setActiveView('dashboard')} />
+            <SidebarNavItem icon={Users} label="Mes migrations" active={activeView === 'mine'} onClick={() => setActiveView('mine')} count={myMigrationsCount} />
+            <SidebarNavItem icon={AlertCircle} label="Relances" active={activeView === 'relances'} onClick={() => setActiveView('relances')} count={relancesCount} />
+        </nav>
+
+        <div className="px-3 mt-5">
+            <p className="px-1 mb-1.5 text-[10px] uppercase tracking-wider font-semibold text-[var(--color-text-secondary)]">Filtre équipe</p>
+            <div className="relative">
+                <Filter className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-[var(--color-text-secondary)] pointer-events-none" />
+                <select
+                    value={selectedTech}
+                    onChange={(e) => setSelectedTech(e.target.value)}
+                    className="w-full pl-7 pr-2 py-1.5 text-xs rounded-[7px] cursor-pointer focus:outline-none focus:ring-1"
+                    style={{ background: TOKENS.navy800, color: '#fff', border: `1px solid ${TOKENS.navy700}` }}
+                >
+                    <option value="Tous">Tous les techs</option>
+                    {techList.map(tech => (<option key={tech} value={tech}>{tech}</option>))}
+                </select>
+            </div>
+        </div>
+
+        <div className="flex-1" />
+
+        <div className="px-3 pb-3 space-y-1 relative z-10">
+            <p className="px-1 mb-1 text-[10px] uppercase tracking-wider font-semibold text-[var(--color-text-secondary)]">Paramètres</p>
+            {isAdmin && (
+                <div className="relative">
+                    <button
+                        onClick={() => { setIsTeamManagerOpen(o => !o); setIsDateScopeOpen(false); }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[8px] text-sm text-slate-300 hover:bg-[var(--color-navy-800)] hover:text-white transition-colors"
+                    >
+                        <Users size={16} /> Équipe technique
+                    </button>
+                    {isTeamManagerOpen && (
+                        <TeamManagerPanel techList={techList} newTechName={newTechName} setNewTechName={setNewTechName} onAdd={handleAddTech} onRemove={handleRemoveTech} onClose={() => setIsTeamManagerOpen(false)} />
+                    )}
+                </div>
+            )}
+            {isAdmin && (
+                <div className="relative">
+                    <button
+                        onClick={() => { setDateScopeDraft({ start: weightsConfig.date_range_start, end: weightsConfig.date_range_end }); setIsDateScopeOpen(o => !o); setIsTeamManagerOpen(false); }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[8px] text-sm text-slate-300 hover:bg-[var(--color-navy-800)] hover:text-white transition-colors"
+                    >
+                        <Calendar size={16} /> Scope de dates
+                    </button>
+                    {isDateScopeOpen && (
+                        <DateScopePanel dateScopeDraft={dateScopeDraft} setDateScopeDraft={setDateScopeDraft} onApply={handleApplyDateScope} onClose={() => setIsDateScopeOpen(false)} isSaving={isSavingDateScope} />
+                    )}
+                </div>
+            )}
+            <button
+                onClick={() => setIsRulesModalOpen(true)}
+                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[8px] text-sm text-slate-300 hover:bg-[var(--color-navy-800)] hover:text-white transition-colors"
+            >
+                <Info size={16} /> Aide / Règles
+            </button>
+        </div>
+
+        {/* Décoration abstraite discrète, non interactive */}
+        <svg className="absolute bottom-0 left-0 w-full pointer-events-none" style={{ opacity: 0.18 }} viewBox="0 0 208 120" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <circle cx="20" cy="110" r="60" fill={TOKENS.sage} />
+            <circle cx="150" cy="130" r="70" fill={TOKENS.terracotta} />
+            <circle cx="100" cy="60" r="40" fill={TOKENS.cobalt} />
+        </svg>
+    </aside>
+);
 
 function MigrationDashboard() {
   const { user } = useUser();
@@ -858,6 +1048,10 @@ function MigrationDashboard() {
   const showToast = useCallback((message, type = 'success') => {
     setToast({ message, type });
   }, []);
+
+  // Injecte une seule fois les polices + variables CSS du design system
+  // (voir injectDesignSystem plus haut) — no-op si déjà présent.
+  useEffect(() => { injectDesignSystem(); }, []);
 
   // --- CHARGEMENT DES DONNÉES MÉTIER (dépend du scope de dates courant) ---
   const fetchBusinessData = useCallback(async (dateRange, techsForQuery, options = {}) => {
@@ -1515,16 +1709,18 @@ function MigrationDashboard() {
       }
   };
 
+  // Badges de statut unifiés (StatusBadge) : même structure partout
+  // (fond doux, texte plus foncé de la même famille), sur les tokens.
   const getStatusBadgeColor = (colorCode) => {
       switch(colorCode) {
-          case 'need': return `bg-blue-50 ${COLORS.text_besoin} border border-blue-100`;
-          case 'encours': return `bg-orange-50 ${COLORS.text_encours} border border-orange-100`;
-          case 'capacity': return `bg-emerald-50 ${COLORS.text_capacite} border border-emerald-100`;
-          case 'ready_migr': return 'bg-indigo-50 text-indigo-600 border border-indigo-100';
-          case 'ready_analyse': return 'bg-cyan-50 text-cyan-600 border border-cyan-100';
+          case 'need': return `bg-[var(--color-cobalt-soft)] ${COLORS.text_besoin} border border-[var(--color-cobalt)]/15`;
+          case 'encours': return `bg-[var(--color-terracotta-soft)] ${COLORS.text_encours} border border-[var(--color-terracotta)]/20`;
+          case 'capacity': return `bg-[var(--color-sage-soft)] ${COLORS.text_capacite} border border-[var(--color-sage)]/25`;
+          case 'ready_migr': return 'bg-[var(--color-cobalt-soft)] text-[var(--color-cobalt)] border border-[var(--color-cobalt)]/15';
+          case 'ready_analyse': return 'bg-[var(--color-surface-muted)] text-[var(--color-navy-700)] border border-[var(--color-border)]';
           case 'reporte': return `bg-red-50 ${COLORS.text_danger} border border-red-100`;
-          case 'attente': return `bg-slate-50 ${COLORS.text_neutral} border border-slate-200`;
-          default: return `bg-slate-50 ${COLORS.text_neutral}`;
+          case 'attente': return `bg-[var(--color-surface-muted)] ${COLORS.text_neutral} border border-[var(--color-border)]`;
+          default: return `bg-[var(--color-surface-muted)] ${COLORS.text_neutral}`;
       }
   };
 
@@ -1735,40 +1931,58 @@ function MigrationDashboard() {
     return (relancesData || []).filter(r => normalizeTechName(r.TECHNICIEN, techList) === relanceTechFilter);
   }, [relancesData, relanceTechFilter, techList]);
 
-  // Seuils d'alerte visuelle sur la ligne : rouge si urgence forte (plus de 2
-  // relances déjà faites, OU 60 jours et plus sans mise à jour), orange si
-  // 1 à 2 relances déjà faites (et pas déjà rouge par ailleurs).
-  const getRelanceRowClass = (r) => {
+  // Niveau de criticité de la relance (3 paliers) : "critique" (rouge
+  // discret + icône) si plus de 2 relances déjà faites OU 60 jours et plus
+  // sans mise à jour ; "à surveiller" (terracotta clair) si 1-2 relances
+  // déjà faites ; sinon "normal". Rendu via une fine bordure gauche + un
+  // badge — jamais une ligne entièrement colorée.
+  const getRelanceCriticite = (r) => {
     const relances = Number(r.RELANCES) || 0;
     const joursSansMaj = Number(r.JOURS_SANS_MAJ) || 0;
-    const isRed = relances > 2 || joursSansMaj >= 60;
-    const isOrange = !isRed && relances >= 1 && relances <= 2;
-    if (isRed) return 'bg-red-100 hover:bg-red-200';
-    if (isOrange) return 'bg-orange-100 hover:bg-orange-200';
-    return 'hover:bg-slate-50';
+    if (relances > 2 || joursSansMaj >= 60) {
+      return { level: 'critique', label: 'Critique', icon: AlertTriangle, borderColor: TOKENS.danger, badgeClass: 'bg-red-50 text-[var(--color-danger)] border border-red-100' };
+    }
+    if (relances >= 1 && relances <= 2) {
+      return { level: 'surveiller', label: 'À surveiller', icon: Clock, borderColor: TOKENS.terracotta, badgeClass: 'bg-[var(--color-terracotta-soft)] text-[var(--color-terracotta)] border border-[var(--color-terracotta)]/20' };
+    }
+    return { level: 'normal', label: 'Normal', icon: CheckCircle2, borderColor: 'transparent', badgeClass: 'bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border border-[var(--color-border)]' };
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 p-4 lg:p-6 animate-in fade-in duration-500 relative">
-      <header className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200/70 shadow-sm">
+    <div className="min-h-screen flex" style={{ background: 'var(--color-background)', color: 'var(--color-text)', fontFamily: 'var(--font-ui)' }}>
+      <Sidebar
+        activeView={activeView} setActiveView={setActiveView}
+        myMigrationsCount={myMigrations.length} relancesCount={relancesData.length}
+        isAdmin={isAdmin} techList={techList} selectedTech={selectedTech} setSelectedTech={setSelectedTech}
+        isTeamManagerOpen={isTeamManagerOpen} setIsTeamManagerOpen={setIsTeamManagerOpen}
+        newTechName={newTechName} setNewTechName={setNewTechName} handleAddTech={handleAddTech} handleRemoveTech={handleRemoveTech}
+        isDateScopeOpen={isDateScopeOpen} setIsDateScopeOpen={setIsDateScopeOpen}
+        dateScopeDraft={dateScopeDraft} setDateScopeDraft={setDateScopeDraft} handleApplyDateScope={handleApplyDateScope}
+        isSavingDateScope={isSavingDateScope} weightsConfig={weightsConfig}
+        setIsRulesModalOpen={setIsRulesModalOpen}
+      />
+      <div className="flex-1 min-w-0 p-4 lg:p-6 animate-in fade-in duration-500 relative">
+      <header className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-[var(--color-surface)] p-3 rounded-[10px] border border-[var(--color-border-soft)] shadow-[0_4px_16px_rgba(11,37,69,0.04)]">
         <div className="flex items-center gap-3">
-          <div className="bg-blue-50 p-2.5 rounded-full ring-1 ring-blue-100">{isLoading ? <Loader className="w-5 h-5 text-blue-600 animate-spin" /> : <Activity className="w-5 h-5 text-blue-600" />}</div>
+          <div className="p-2.5 rounded-full ring-1 ring-[var(--color-cobalt)]/15 bg-[var(--color-cobalt-soft)] lg:hidden">{isLoading ? <Loader className="w-5 h-5 text-[var(--color-cobalt)] animate-spin" /> : <Activity className="w-5 h-5 text-[var(--color-cobalt)]" />}</div>
           <div>
-            <h1 className="text-lg font-bold text-slate-800 leading-tight">Pilotage Migrations</h1>
-            <p className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
-              <span>{selectedTech === 'Tous' ? "Vue Équipe" : `Focus: ${selectedTech}`}</span>
-              <span className="text-slate-300">•</span>
-              <span className="inline-flex items-center gap-1 text-slate-500">
+            <h1 className="leading-tight" style={{ fontFamily: 'var(--font-heading)', fontSize: 26, fontWeight: 700, color: 'var(--color-text)' }}>
+              {activeView === 'dashboard' ? 'Vue équipe' : activeView === 'mine' ? 'Mes migrations' : 'Relances'}
+            </h1>
+            <p className="text-xs flex items-center gap-2 flex-wrap mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+              <span>{selectedTech === 'Tous' ? "Toute l'équipe" : `Focus : ${selectedTech}`}</span>
+              <span className="opacity-40">•</span>
+              <span className="inline-flex items-center gap-1">
                 <Calendar size={11} />
                 Scope : {weightsConfig.date_range_start ? new Date(weightsConfig.date_range_start).toLocaleDateString('fr-FR') : '—'} → {weightsConfig.date_range_end ? new Date(weightsConfig.date_range_end).toLocaleDateString('fr-FR') : '—'}
               </span>
               {lastSyncTime && (
                 <>
-                  <span className="text-slate-300">•</span>
+                  <span className="opacity-40">•</span>
                   <button
                     onClick={() => fetchBusinessData({ start: weightsConfig.date_range_start, end: weightsConfig.date_range_end }, techList, { forceRefresh: true })}
                     disabled={isLoading}
-                    className="inline-flex items-center gap-1 text-slate-500 hover:text-blue-600 transition-colors disabled:opacity-50"
+                    className="inline-flex items-center gap-1 hover:text-[var(--color-cobalt)] transition-colors disabled:opacity-50"
                     title="Recharger les données"
                   >
                     <RefreshCw size={11} className={isLoading ? 'animate-spin' : ''} />
@@ -1782,53 +1996,18 @@ function MigrationDashboard() {
 
         {/* --- Barre d'actions desktop --- */}
         <div className="hidden md:flex gap-2 items-center">
-            {isAdmin && (
-              <div className="relative">
-                <button
-                  onClick={() => { setIsTeamManagerOpen(o => !o); setIsDateScopeOpen(false); }}
-                  className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-                  title="Gérer l'équipe"
-                >
-                  <Users size={20} />
-                </button>
-                {isTeamManagerOpen && (
-                  <TeamManagerPanel techList={techList} newTechName={newTechName} setNewTechName={setNewTechName} onAdd={handleAddTech} onRemove={handleRemoveTech} onClose={() => setIsTeamManagerOpen(false)} />
-                )}
-              </div>
-            )}
-            {isAdmin && (
-              <div className="relative">
-                <button
-                  onClick={() => { setDateScopeDraft({ start: weightsConfig.date_range_start, end: weightsConfig.date_range_end }); setIsDateScopeOpen(o => !o); setIsTeamManagerOpen(false); }}
-                  className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-                  title="Modifier le scope de dates"
-                >
-                  <Calendar size={20} />
-                </button>
-                {isDateScopeOpen && (
-                  <DateScopePanel dateScopeDraft={dateScopeDraft} setDateScopeDraft={setDateScopeDraft} onApply={handleApplyDateScope} onClose={() => setIsDateScopeOpen(false)} isSaving={isSavingDateScope} />
-                )}
-              </div>
-            )}
-            <button onClick={() => setIsRulesModalOpen(true)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Règles de calcul"><Info size={20} /></button>
             <UserButton />
-            <div className="relative">
-                <Filter className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
-                <select value={selectedTech} onChange={(e) => { setSelectedTech(e.target.value); }} className="pl-7 pr-3 py-1.5 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer">
-                    <option value="Tous">Tous les techs</option>
-                    {techList.map(tech => (<option key={tech} value={tech}>{tech}</option>))}
-                </select>
-            </div>
-            {(selectedMonth || showPlanning) && (<button onClick={() => { setSelectedMonth(null); setShowPlanning(false); setChartMode('months'); }} className="flex items-center gap-1 bg-red-50 text-red-600 px-3 py-1.5 rounded-md text-xs font-medium hover:bg-red-100 transition-colors border border-red-100"><X className="w-3 h-3" /> Retour Vue Globale</button>)}
+            {(selectedMonth || showPlanning) && (<button onClick={() => { setSelectedMonth(null); setShowPlanning(false); setChartMode('months'); }} className="flex items-center gap-1 bg-[var(--color-surface)] text-[var(--color-navy-700)] px-3 py-1.5 rounded-md text-xs font-medium hover:bg-[var(--color-surface-muted)] transition-colors border border-[var(--color-border)]"><X className="w-3 h-3" /> Retour Vue Globale</button>)}
         </div>
 
-        {/* --- Barre d'actions mobile : tout regroupé derrière un bouton "Filtres" --- */}
-        <div className="flex md:hidden items-center gap-2">
-            <button onClick={() => setIsRulesModalOpen(true)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Règles de calcul"><Info size={18} /></button>
+        {/* --- Barre d'actions mobile / tablette (< lg, sidebar masquée) --- */}
+        <div className="flex lg:hidden items-center gap-2">
+            <button onClick={() => setIsRulesModalOpen(true)} className="p-2 rounded-md transition-colors" style={{ color: 'var(--color-text-secondary)' }} title="Règles de calcul"><Info size={18} /></button>
             <UserButton />
             <button
               onClick={() => setIsMobileFiltersOpen(o => !o)}
-              className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${isMobileFiltersOpen || selectedTech !== 'Tous' ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-slate-50 border-slate-200 text-slate-600'}`}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${isMobileFiltersOpen || selectedTech !== 'Tous' ? 'bg-[var(--color-cobalt-soft)] border-[var(--color-cobalt)]/20 text-[var(--color-cobalt)]' : 'bg-[var(--color-surface-muted)] border-[var(--color-border)]'}`}
+              style={!(isMobileFiltersOpen || selectedTech !== 'Tous') ? { color: 'var(--color-text-secondary)' } : undefined}
             >
               <SlidersHorizontal size={14} /> Filtres
             </button>
@@ -1836,82 +2015,64 @@ function MigrationDashboard() {
       </header>
 
       {isMobileFiltersOpen && (
-        <div className="md:hidden mb-4 bg-white p-4 rounded-lg border border-slate-200 shadow-sm space-y-4 animate-in fade-in slide-in-from-top-2 duration-150">
+        <div className="lg:hidden mb-4 bg-[var(--color-surface)] p-4 rounded-[10px] border border-[var(--color-border-soft)] shadow-[0_4px_16px_rgba(11,37,69,0.04)] space-y-4 animate-in fade-in slide-in-from-top-2 duration-150">
+          <div className="flex gap-1 p-1 rounded-lg" style={{ background: 'var(--color-surface-muted)' }}>
+            <button onClick={() => setActiveView('dashboard')} className={`flex-1 px-2 py-1.5 rounded-md text-xs font-semibold transition-colors ${activeView === 'dashboard' ? 'bg-[var(--color-surface)] shadow-[0_4px_16px_rgba(11,37,69,0.04)]' : ''}`} style={{ color: activeView === 'dashboard' ? 'var(--color-text)' : 'var(--color-text-secondary)' }}>Vue équipe</button>
+            <button onClick={() => setActiveView('mine')} className={`flex-1 px-2 py-1.5 rounded-md text-xs font-semibold transition-colors ${activeView === 'mine' ? 'bg-[var(--color-surface)] shadow-[0_4px_16px_rgba(11,37,69,0.04)]' : ''}`} style={{ color: activeView === 'mine' ? 'var(--color-text)' : 'var(--color-text-secondary)' }}>Mes migrations</button>
+            <button onClick={() => setActiveView('relances')} className={`flex-1 px-2 py-1.5 rounded-md text-xs font-semibold transition-colors ${activeView === 'relances' ? 'bg-[var(--color-surface)] shadow-[0_4px_16px_rgba(11,37,69,0.04)]' : ''}`} style={{ color: activeView === 'relances' ? 'var(--color-text)' : 'var(--color-text-secondary)' }}>Relances</button>
+          </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Technicien</label>
-            <select value={selectedTech} onChange={(e) => setSelectedTech(e.target.value)} className="w-full pl-3 pr-3 py-2 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
+            <label className="block text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-secondary)' }}>Technicien</label>
+            <select value={selectedTech} onChange={(e) => setSelectedTech(e.target.value)} className="w-full pl-3 pr-3 py-2 text-sm bg-[var(--color-surface-muted)] border border-[var(--color-border)] rounded-md focus:outline-none focus:ring-1 focus:ring-[var(--color-cobalt)]">
                 <option value="Tous">Tous les techs</option>
                 {techList.map(tech => (<option key={tech} value={tech}>{tech}</option>))}
             </select>
           </div>
           {isAdmin && (
             <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Scope de dates</label>
+              <label className="block text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-secondary)' }}>Scope de dates</label>
               <div className="flex items-center gap-2">
-                <input type="date" value={dateScopeDraft.start || ''} onChange={(e) => setDateScopeDraft(d => ({ ...d, start: e.target.value }))} className="flex-1 text-sm border border-slate-200 rounded-md py-2 px-2" />
-                <span className="text-slate-400 text-xs">→</span>
-                <input type="date" value={dateScopeDraft.end || ''} onChange={(e) => setDateScopeDraft(d => ({ ...d, end: e.target.value }))} className="flex-1 text-sm border border-slate-200 rounded-md py-2 px-2" />
+                <input type="date" value={dateScopeDraft.start || ''} onChange={(e) => setDateScopeDraft(d => ({ ...d, start: e.target.value }))} className="flex-1 text-sm border border-[var(--color-border)] rounded-md py-2 px-2" />
+                <span className="text-xs opacity-50">→</span>
+                <input type="date" value={dateScopeDraft.end || ''} onChange={(e) => setDateScopeDraft(d => ({ ...d, end: e.target.value }))} className="flex-1 text-sm border border-[var(--color-border)] rounded-md py-2 px-2" />
               </div>
-              <button onClick={() => handleApplyDateScope()} disabled={isSavingDateScope} className="mt-2 w-full px-3 py-2 text-xs bg-blue-600 text-white rounded-md font-bold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-1">
+              <button onClick={() => handleApplyDateScope()} disabled={isSavingDateScope} className="mt-2 w-full px-3 py-2 text-xs bg-[var(--color-cobalt)] text-white rounded-md font-bold hover:opacity-90 transition-colors disabled:opacity-50 flex items-center justify-center gap-1">
                 {isSavingDateScope ? <Loader size={12} className="animate-spin" /> : <Save size={12} />} Appliquer le scope
               </button>
             </div>
           )}
           {(selectedMonth || showPlanning) && (
-            <button onClick={() => { setSelectedMonth(null); setShowPlanning(false); setChartMode('months'); }} className="w-full flex items-center justify-center gap-1 bg-red-50 text-red-600 px-3 py-2 rounded-md text-xs font-medium hover:bg-red-100 transition-colors border border-red-100"><X className="w-3 h-3" /> Retour Vue Globale</button>
+            <button onClick={() => { setSelectedMonth(null); setShowPlanning(false); setChartMode('months'); }} className="w-full flex items-center justify-center gap-1 bg-[var(--color-surface)] text-[var(--color-navy-700)] px-3 py-2 rounded-md text-xs font-medium hover:bg-[var(--color-surface-muted)] transition-colors border border-[var(--color-border)]"><X className="w-3 h-3" /> Retour Vue Globale</button>
           )}
         </div>
       )}
 
-      <div className="flex gap-1 mb-4 bg-slate-100/70 p-1 rounded-lg w-fit">
-        <button
-          onClick={() => setActiveView('dashboard')}
-          className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${activeView === 'dashboard' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-        >
-          Vue équipe
-        </button>
-        <button
-          onClick={() => setActiveView('mine')}
-          className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${activeView === 'mine' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-        >
-          Mes migrations
-          {myMigrations.length > 0 && <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px]">{myMigrations.length}</span>}
-        </button>
-        <button
-          onClick={() => setActiveView('relances')}
-          className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${activeView === 'relances' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-        >
-          Relances
-          {relancesData.length > 0 && <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700 text-[10px]">{relancesData.length}</span>}
-        </button>
-      </div>
-
       {activeView === 'dashboard' && (
       <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-        <div onClick={() => { setShowPlanning(!showPlanning); setSelectedMonth(null); setChartMode('months'); }} className={`px-4 py-3 rounded-xl shadow-sm border flex flex-col justify-center cursor-pointer transition-all duration-200 gap-3 ${showPlanning ? 'bg-indigo-50 border-indigo-200 ring-2 ring-indigo-100' : 'bg-white border-slate-200/70 hover:bg-slate-50'}`}>
-            <PipeProgress label="Prêt pour Mise en Place" count={planningCount} colorClass="text-indigo-600" barColor="bg-indigo-500" />
-            <PipeProgress label="Prêt pour Analyse" count={analysisPipeCount} colorClass="text-cyan-600" barColor="bg-cyan-500" />
+        <div onClick={() => { setShowPlanning(!showPlanning); setSelectedMonth(null); setChartMode('months'); }} className={`px-4 py-3 rounded-[10px] border flex flex-col justify-center cursor-pointer transition-all duration-200 gap-3 shadow-[0_4px_16px_rgba(11,37,69,0.04)] ${showPlanning ? 'bg-[var(--color-cobalt-soft)] border-[var(--color-border)] ring-2 ring-[var(--color-cobalt)]/20' : 'bg-[var(--color-surface)] border-[var(--color-border-soft)] hover:bg-[var(--color-surface-muted)]'}`}>
+            <PipeProgress label="Prêt pour Mise en Place" count={planningCount} tone="cobalt" />
+            <PipeProgress label="Prêt pour Analyse" count={analysisPipeCount} tone="navy" />
         </div>
-        <KPICard title="Besoin Total (h)" value={kpiStats.besoin.toFixed(0)} subtext={chartMode !== 'months' ? "Restant" : "Annuel"} icon={Users} colorClass={COLORS.text_besoin} active={chartMode !== 'months'} isLoading={isLoading}/>
-        <KPICard title="Capacité (h)" value={kpiStats.capacite.toFixed(0)} subtext="Planifiée" icon={Clock} colorClass={COLORS.text_capacite} active={chartMode !== 'months'} isLoading={isLoading}/>
-        <KPICard title="Taux Couverture" value={`${kpiStats.ratio.toFixed(0)}%`} subtext="Capa. / Besoin" icon={TrendingUp} colorClass={kpiStats.ratio >= 100 ? COLORS.text_ok : COLORS.text_danger} active={chartMode !== 'months'} isLoading={isLoading}/>
+        <KPICard title="Besoin Total (h)" value={kpiStats.besoin.toFixed(0)} subtext={chartMode !== 'months' ? "Restant" : "Annuel"} icon={Users} tone="cobalt" active={chartMode !== 'months'} isLoading={isLoading}/>
+        <KPICard title="Capacité (h)" value={kpiStats.capacite.toFixed(0)} subtext="Planifiée" icon={Clock} tone="sage" active={chartMode !== 'months'} isLoading={isLoading}/>
+        <KPICard title="Taux Couverture" value={`${kpiStats.ratio.toFixed(0)}%`} subtext="Capa. / Besoin" icon={TrendingUp} tone={kpiStats.ratio >= 100 ? 'sage' : 'danger'} active={chartMode !== 'months'} isLoading={isLoading}/>
       </div>
 
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200/70 mb-4">
+      <div className="bg-[var(--color-surface)] p-4 rounded-[10px] shadow-[0_4px_16px_rgba(11,37,69,0.04)] border border-[var(--color-border-soft)] mb-4">
         <div className="flex flex-col sm:flex-row items-center justify-between mb-4 gap-4">
-            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg flex-wrap">
-                <button onClick={() => toggleViewMode('months')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${chartMode === 'months' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Vue Annuelle (Mois)</button>
-                <button onClick={() => toggleViewMode('weeks-month')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${chartMode === 'weeks-month' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Vue Détaillée (Semaines)</button>
-                <button onClick={() => toggleViewMode('weeks-all')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${chartMode === 'weeks-all' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Toutes les Semaines</button>
+            <div className="flex items-center gap-2 bg-[var(--color-surface-muted)] p-1 rounded-lg flex-wrap">
+                <button onClick={() => toggleViewMode('months')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${chartMode === 'months' ? 'bg-[var(--color-surface)] text-[var(--color-cobalt)] shadow-[0_4px_16px_rgba(11,37,69,0.04)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text)]'}`}>Vue Annuelle (Mois)</button>
+                <button onClick={() => toggleViewMode('weeks-month')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${chartMode === 'weeks-month' ? 'bg-[var(--color-surface)] text-[var(--color-cobalt)] shadow-[0_4px_16px_rgba(11,37,69,0.04)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text)]'}`}>Vue Détaillée (Semaines)</button>
+                <button onClick={() => toggleViewMode('weeks-all')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${chartMode === 'weeks-all' ? 'bg-[var(--color-surface)] text-[var(--color-cobalt)] shadow-[0_4px_16px_rgba(11,37,69,0.04)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text)]'}`}>Toutes les Semaines</button>
             </div>
             {chartMode === 'weeks-month' && (
                 <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-200">
-                    <span className="text-xs text-slate-500 font-medium">Mois :</span>
-                    <select value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="text-sm border border-slate-200 rounded-md py-1 px-2 focus:ring-blue-500 bg-white">{availableMonths.map(m => (<option key={m} value={m}>{formatMonth(m)}</option>))}</select>
+                    <span className="text-xs text-[var(--color-text-secondary)] font-medium">Mois :</span>
+                    <select value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="text-sm border border-[var(--color-border)] rounded-md py-1 px-2 focus:ring-[var(--color-cobalt)] bg-[var(--color-surface)]">{availableMonths.map(m => (<option key={m} value={m}>{formatMonth(m)}</option>))}</select>
                 </div>
             )}
-            <div className="flex gap-3 text-[10px] font-medium uppercase tracking-wider text-slate-500 ml-auto">
+            <div className="flex gap-3 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-secondary)] ml-auto">
                 <div className="flex items-center gap-1"><span className={`w-2 h-2 rounded-full ${COLORS.bg_besoin}`}></span> Besoin (Bleu clair)</div>
                 <div className="flex items-center gap-1"><span className={`w-2 h-2 rounded-full ${COLORS.bg_encours}`}></span> En Cours (Orange clair)</div>
                 <div className="flex items-center gap-1"><span className={`w-2 h-2 rounded-full ${COLORS.bg_capacite}`}></span> Capacité (Vert clair)</div>
@@ -1968,33 +2129,33 @@ function MigrationDashboard() {
           </ResponsiveContainer>
           )}
         </div>
-        {chartMode === 'months' && <p className="text-[10px] text-center text-slate-400 italic mt-1">Cliquez sur un mois pour voir le détail par semaine</p>}
+        {chartMode === 'months' && <p className="text-[10px] text-center text-[var(--color-text-secondary)] italic mt-1">Cliquez sur un mois pour voir le détail par semaine</p>}
         {chartMode === 'months' && monthlyAggregatedData.some(m => m.isCurrentMonthPartial) && (
-          <p className="text-[10px] text-center text-slate-400 italic">Mois en cours : seule la capacité/besoin restant à partir d'aujourd'hui est comptabilisé.</p>
+          <p className="text-[10px] text-center text-[var(--color-text-secondary)] italic">Mois en cours : seule la capacité/besoin restant à partir d'aujourd'hui est comptabilisé.</p>
         )}
         {chartMode !== 'months' && mainChartData.some(w => w.isPast) && (
-          <p className="text-[10px] text-center text-slate-400 italic mt-1">Semaines grisées : déjà passées, exclues des totaux ci-dessus.</p>
+          <p className="text-[10px] text-center text-[var(--color-text-secondary)] italic mt-1">Semaines grisées : déjà passées, exclues des totaux ci-dessus.</p>
         )}
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200/70 overflow-hidden mb-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
-        <button onClick={() => setIsDetailListExpanded(!isDetailListExpanded)} className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors">
-          <div className="flex items-center gap-2"><FileText className="w-4 h-4 text-slate-400" /><h2 className="text-sm font-bold text-slate-800">Détail des Opérations {selectedTech !== 'Tous' ? `: ${selectedTech}` : "(Tous)"}</h2><span className="ml-2 text-xs font-normal text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">{filteredAndSortedEvents.length} entrées</span></div>
-          {isDetailListExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
+      <div className="bg-[var(--color-surface)] rounded-[10px] shadow-[0_4px_16px_rgba(11,37,69,0.04)] border border-[var(--color-border-soft)] overflow-hidden mb-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
+        <button onClick={() => setIsDetailListExpanded(!isDetailListExpanded)} className="w-full px-4 py-3 border-b border-[var(--color-border-soft)] flex items-center justify-between bg-[var(--color-surface-muted)] hover:bg-[var(--color-surface-muted)] transition-colors">
+          <div className="flex items-center gap-2"><FileText className="w-4 h-4 text-[var(--color-text-secondary)]" /><h2 className="text-sm font-bold text-[var(--color-text)]">Détail des Opérations {selectedTech !== 'Tous' ? `: ${selectedTech}` : "(Tous)"}</h2><span className="ml-2 text-xs font-normal text-[var(--color-text-secondary)] bg-[var(--color-surface)] px-2 py-0.5 rounded border border-[var(--color-border)]">{filteredAndSortedEvents.length} entrées</span></div>
+          {isDetailListExpanded ? <ChevronUp className="w-4 h-4 text-[var(--color-text-secondary)]" /> : <ChevronDown className="w-4 h-4 text-[var(--color-text-secondary)]" />}
         </button>
         {isDetailListExpanded && (
-          <div className="px-4 py-2 border-b border-slate-100 bg-white">
+          <div className="px-4 py-2 border-b border-[var(--color-border-soft)] bg-[var(--color-surface)]">
             <div className="relative max-w-xs">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-text-secondary)]" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Rechercher un client / dossier..."
-                className="w-full pl-8 pr-8 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full pl-8 pr-8 py-1.5 text-xs bg-[var(--color-surface-muted)] border border-[var(--color-border)] rounded-md focus:outline-none focus:ring-1 focus:ring-[var(--color-cobalt)]"
               />
               {searchQuery && (
-                <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)] hover:text-[var(--color-text)]">
                   <X size={13} />
                 </button>
               )}
@@ -2003,8 +2164,8 @@ function MigrationDashboard() {
         )}
         {isDetailListExpanded && (
           <div className="overflow-x-auto max-h-96">
-            <table className="w-full text-xs text-left text-slate-600">
-              <thead className="text-xs text-slate-500 uppercase bg-slate-50/50 border-b border-slate-100 sticky top-0 backdrop-blur-sm z-10">
+            <table className="w-full text-xs text-left text-[var(--color-text-secondary)]">
+              <thead className="text-xs text-[var(--color-text-secondary)] uppercase bg-[var(--color-surface-muted)] border-b border-[var(--color-border-soft)] sticky top-0 backdrop-blur-sm z-10">
                 <tr>
                   <SortableHeader label="Date" sortKey="date" currentSort={sortConfig} onSort={handleSort} />
                   <SortableHeader label="Technicien" sortKey="tech" currentSort={sortConfig} onSort={handleSort} />
@@ -2032,21 +2193,21 @@ function MigrationDashboard() {
                       <tr 
                           key={index} 
                           className={`transition-colors ${
-                              event.ageWarning === 'red' ? 'bg-red-100 hover:bg-red-200' : 
-                              event.ageWarning === 'orange' ? 'bg-orange-100 hover:bg-orange-200' : 
-                              'hover:bg-slate-50'
+                              event.ageWarning === 'red' ? 'bg-red-50 hover:bg-red-100' : 
+                              event.ageWarning === 'orange' ? 'bg-[var(--color-terracotta-soft)] hover:opacity-90' : 
+                              'hover:bg-[var(--color-surface-muted)]'
                           }`}
                           title={event.creeLeFormatted && event.creeLeFormatted !== "N/A" ? `Créé le : ${event.creeLeFormatted}` : ""}
                       >
-                        <td className="px-2 py-1 font-medium text-slate-800 whitespace-nowrap">{event.date === "N/A" ? "En attente" : new Date(event.date).toLocaleDateString('fr-FR')}</td>
+                        <td className="px-2 py-1 font-medium text-[var(--color-text)] whitespace-nowrap">{event.date === "N/A" ? "En attente" : new Date(event.date).toLocaleDateString('fr-FR')}</td>
                         <td className="px-2 py-1 whitespace-nowrap truncate max-w-[150px]">{event.tech}</td>
-                        <td className="px-2 py-1 font-medium text-slate-700 whitespace-nowrap truncate max-w-[200px]">{event.client}</td>
-                        <td className="px-2 py-1 text-slate-500 whitespace-nowrap">{event.type}</td>
+                        <td className="px-2 py-1 font-medium text-[var(--color-text)] whitespace-nowrap truncate max-w-[200px]">{event.client}</td>
+                        <td className="px-2 py-1 text-[var(--color-text-secondary)] whitespace-nowrap">{event.type}</td>
                         <td className="px-2 py-1 text-right font-medium whitespace-nowrap">{event.duration > 0 ? event.duration.toFixed(2) : '-'}</td>
                         <td className="px-2 py-1 text-center whitespace-nowrap"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${getStatusBadgeColor(event.color)}`}>{event.status}</span></td>
                       </tr>
                     ))}
-                    {filteredAndSortedEvents.length === 0 && (<tr><td colSpan="6" className="px-4 py-8 text-center text-slate-400 italic">Aucun événement trouvé.</td></tr>)}
+                    {filteredAndSortedEvents.length === 0 && (<tr><td colSpan="6" className="px-4 py-8 text-center text-[var(--color-text-secondary)] italic">Aucun événement trouvé.</td></tr>)}
                   </>
                 )}
               </tbody>
@@ -2054,7 +2215,7 @@ function MigrationDashboard() {
           </div>
         )}
         {isDetailListExpanded && !isLoading && filteredAndSortedEvents.length > 0 && (
-          <div className="flex items-center justify-between px-4 py-2 border-t border-slate-100 bg-slate-50/50 text-xs text-slate-500">
+          <div className="flex items-center justify-between px-4 py-2 border-t border-[var(--color-border-soft)] bg-[var(--color-surface-muted)] text-xs text-[var(--color-text-secondary)]">
             <span>
               {(currentPage - 1) * DETAIL_TABLE_PAGE_SIZE + 1}–{Math.min(currentPage * DETAIL_TABLE_PAGE_SIZE, filteredAndSortedEvents.length)} sur {filteredAndSortedEvents.length}
             </span>
@@ -2062,15 +2223,15 @@ function MigrationDashboard() {
               <button
                 onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                 disabled={currentPage === 1}
-                className="px-2 py-1 rounded border border-slate-200 bg-white font-medium hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="px-2 py-1 rounded border border-[var(--color-border)] bg-[var(--color-surface)] font-medium hover:bg-[var(--color-surface-muted)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 Précédent
               </button>
-              <span className="font-medium text-slate-600">Page {currentPage} / {totalDetailPages}</span>
+              <span className="font-medium text-[var(--color-text-secondary)]">Page {currentPage} / {totalDetailPages}</span>
               <button
                 onClick={() => setCurrentPage(p => Math.min(totalDetailPages, p + 1))}
                 disabled={currentPage === totalDetailPages}
-                className="px-2 py-1 rounded border border-slate-200 bg-white font-medium hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="px-2 py-1 rounded border border-[var(--color-border)] bg-[var(--color-surface)] font-medium hover:bg-[var(--color-surface-muted)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 Suivant
               </button>
@@ -2080,10 +2241,10 @@ function MigrationDashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200/70 overflow-hidden h-fit">
-            <button onClick={() => setIsTechChartExpanded(!isTechChartExpanded)} className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors">
-                <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Users className="w-4 h-4 text-slate-400" />Charge par Tech {selectedMonth ? `(${formatMonth(selectedMonth)})` : "(Globale)"}</h2>
-                {isTechChartExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
+        <div className="bg-[var(--color-surface)] rounded-[10px] shadow-[0_4px_16px_rgba(11,37,69,0.04)] border border-[var(--color-border-soft)] overflow-hidden h-fit">
+            <button onClick={() => setIsTechChartExpanded(!isTechChartExpanded)} className="w-full px-4 py-3 border-b border-[var(--color-border-soft)] flex items-center justify-between bg-[var(--color-surface-muted)] hover:bg-[var(--color-surface-muted)] transition-colors">
+                <h2 className="text-sm font-bold text-[var(--color-text)] flex items-center gap-2"><Users className="w-4 h-4 text-[var(--color-text-secondary)]" />Charge par Tech {selectedMonth ? `(${formatMonth(selectedMonth)})` : "(Globale)"}</h2>
+                {isTechChartExpanded ? <ChevronUp className="w-4 h-4 text-[var(--color-text-secondary)]" /> : <ChevronDown className="w-4 h-4 text-[var(--color-text-secondary)]" />}
             </button>
             {isTechChartExpanded && (
                 <div className="h-64 w-full p-4 animate-in fade-in slide-in-from-top-2 duration-200">
@@ -2104,15 +2265,15 @@ function MigrationDashboard() {
         <div className="hidden lg:block"></div> 
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200/70 overflow-hidden mb-16">
-        <button onClick={() => setIsTableExpanded(!isTableExpanded)} className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors">
-          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2"><TableIcon className="w-4 h-4 text-slate-400" />Résultats Mensuels Détaillés (Globaux)</h2>
-          {isTableExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
+      <div className="bg-[var(--color-surface)] rounded-[10px] shadow-[0_4px_16px_rgba(11,37,69,0.04)] border border-[var(--color-border-soft)] overflow-hidden mb-16">
+        <button onClick={() => setIsTableExpanded(!isTableExpanded)} className="w-full px-4 py-3 border-b border-[var(--color-border-soft)] flex items-center justify-between bg-[var(--color-surface-muted)] hover:bg-[var(--color-surface-muted)] transition-colors">
+          <h2 className="text-sm font-bold text-[var(--color-text)] flex items-center gap-2"><TableIcon className="w-4 h-4 text-[var(--color-text-secondary)]" />Résultats Mensuels Détaillés (Globaux)</h2>
+          {isTableExpanded ? <ChevronUp className="w-4 h-4 text-[var(--color-text-secondary)]" /> : <ChevronDown className="w-4 h-4 text-[var(--color-text-secondary)]" />}
         </button>
         {isTableExpanded && (
           <div className="overflow-x-auto animate-in fade-in slide-in-from-top-2 duration-200">
-            <table className="w-full text-sm text-left text-slate-600">
-              <thead className="text-xs text-slate-500 uppercase bg-slate-50/50 border-b border-slate-100">
+            <table className="w-full text-sm text-left text-[var(--color-text-secondary)]">
+              <thead className="text-xs text-[var(--color-text-secondary)] uppercase bg-[var(--color-surface-muted)] border-b border-[var(--color-border-soft)]">
                 <tr>
                     <th className="px-4 py-3 font-semibold">Mois</th>
                     <th className="px-4 py-3 font-semibold text-right">Besoin Total</th>
@@ -2123,15 +2284,15 @@ function MigrationDashboard() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {monthlyAggregatedData.map((row) => (
-                  <tr key={row.month} className={`hover:bg-slate-50 transition-colors ${selectedMonth === row.month ? 'bg-blue-50/50' : ''}`}>
-                    <td className="px-4 py-2 font-medium text-slate-800 capitalize">
+                  <tr key={row.month} className={`hover:bg-[var(--color-surface-muted)] transition-colors ${selectedMonth === row.month ? 'bg-[var(--color-cobalt-soft)]/50' : ''}`}>
+                    <td className="px-4 py-2 font-medium text-[var(--color-text)] capitalize">
                         {row.label}
-                        {row.isCurrentMonthPartial && <span className="ml-1.5 text-[9px] font-bold uppercase text-blue-500 bg-blue-50 px-1 py-0.5 rounded align-middle">restant</span>}
+                        {row.isCurrentMonthPartial && <span className="ml-1.5 text-[9px] font-bold uppercase text-[var(--color-cobalt)] bg-[var(--color-cobalt-soft)] px-1 py-0.5 rounded align-middle">restant</span>}
                     </td>
                     <td className="px-4 py-2 text-right">{row.totalBesoinMois.toFixed(1)} h</td>
                     <td className={`px-4 py-2 text-right ${COLORS.text_encours}`}>{row.besoin_encours > 0 ? `${row.besoin_encours.toFixed(1)} h` : '-'}</td>
                     <td className={`px-4 py-2 text-right ${COLORS.text_capacite} font-medium`}>{row.capacite.toFixed(1)} h</td>
-                    <td className="px-4 py-2 text-right"><span className={`px-2 py-0.5 rounded text-xs font-medium ${row.soldeMensuel >= 0 ? `bg-emerald-50 ${COLORS.text_ok}` : `bg-red-50 ${COLORS.text_danger}`}`}>{row.soldeMensuel > 0 ? '+' : ''}{row.soldeMensuel.toFixed(1)} h</span></td>
+                    <td className="px-4 py-2 text-right"><span className={`px-2 py-0.5 rounded text-xs font-medium ${row.soldeMensuel >= 0 ? `bg-[var(--color-sage-soft)] ${COLORS.text_ok}` : `bg-red-50 ${COLORS.text_danger}`}`}>{row.soldeMensuel > 0 ? '+' : ''}{row.soldeMensuel.toFixed(1)} h</span></td>
                   </tr>
                 ))}
               </tbody>
@@ -2146,8 +2307,8 @@ function MigrationDashboard() {
         <div style={uiTheme !== 'default' ? { background: AURORA_THEMES[uiTheme === 'aurora-dark' ? 'dark' : 'light'].page, borderRadius: 16, padding: 16, margin: '-4px' } : undefined}>
           <div className="mb-4 flex items-start justify-between gap-4 flex-wrap">
             <div>
-              <h2 className={`text-base font-bold ${uiTheme !== 'default' ? '' : 'text-slate-800'}`} style={uiTheme !== 'default' ? { color: AURORA_THEMES[uiTheme === 'aurora-dark' ? 'dark' : 'light'].text } : undefined}>Mes migrations en cours</h2>
-              <p className={`text-xs mt-0.5 ${uiTheme !== 'default' ? '' : 'text-slate-500'}`} style={uiTheme !== 'default' ? { color: AURORA_THEMES[uiTheme === 'aurora-dark' ? 'dark' : 'light'].sub } : undefined}>
+              <h2 className={`text-base font-bold ${uiTheme !== 'default' ? '' : 'text-[var(--color-text)]'}`} style={uiTheme !== 'default' ? { color: AURORA_THEMES[uiTheme === 'aurora-dark' ? 'dark' : 'light'].text } : undefined}>Mes migrations en cours</h2>
+              <p className={`text-xs mt-0.5 ${uiTheme !== 'default' ? '' : 'text-[var(--color-text-secondary)]'}`} style={uiTheme !== 'default' ? { color: AURORA_THEMES[uiTheme === 'aurora-dark' ? 'dark' : 'light'].sub } : undefined}>
                 {effectiveTechName === 'Inconnu'
                   ? "Votre nom n'a pas été reconnu dans l'équipe technique — vérifiez la correspondance avec votre profil Clerk."
                   : `Suivi des dossiers actifs assignés à ${effectiveTechName}, basé sur la catégorie du ticket.`}
@@ -2156,33 +2317,21 @@ function MigrationDashboard() {
             <div className="flex items-center gap-2 flex-wrap">
               {isAdmin && (
                 <>
-                  <div className="relative">
-                    <button
-                      onClick={() => { setDateScopeDraft({ start: weightsConfig.date_range_start, end: weightsConfig.date_range_end }); setIsDateScopeOpen(o => !o); }}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-md hover:bg-slate-50 transition-colors"
-                      title="Élargir ou réduire la période affichée"
-                    >
-                      <Calendar size={13} /> Scope de dates
-                    </button>
-                    {isDateScopeOpen && (
-                      <DateScopePanel dateScopeDraft={dateScopeDraft} setDateScopeDraft={setDateScopeDraft} onApply={handleApplyDateScope} onClose={() => setIsDateScopeOpen(false)} isSaving={isSavingDateScope} />
-                    )}
-                  </div>
                   <button
                     onClick={handleQuickYearScope}
                     disabled={isSavingDateScope}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-100 rounded-md hover:bg-blue-100 transition-colors disabled:opacity-50"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-[var(--color-cobalt)] bg-[var(--color-cobalt-soft)] border border-[var(--color-cobalt)]/15 rounded-md hover:bg-[var(--color-cobalt-soft)] transition-colors disabled:opacity-50"
                     title="Élargit le scope à 6 mois avant / 6 mois après aujourd'hui"
                   >
                     {isSavingDateScope ? <Loader size={13} className="animate-spin" /> : <CalendarClock size={13} />} Voir toute l'année
                   </button>
                 </>
               )}
-              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Visualiser en tant que</label>
+              <label className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide">Visualiser en tant que</label>
               <select
                 value={viewAsTech || ''}
                 onChange={(e) => setViewAsTech(e.target.value || null)}
-                className="text-sm border border-slate-200 rounded-md py-1.5 px-2 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="text-sm border border-[var(--color-border)] rounded-md py-1.5 px-2 bg-[var(--color-surface)] focus:outline-none focus:ring-1 focus:ring-[var(--color-cobalt)]"
               >
                 <option value="">Moi ({currentTechName})</option>
                 {techList.map(tech => (<option key={tech} value={tech}>{tech}</option>))}
@@ -2190,38 +2339,46 @@ function MigrationDashboard() {
             </div>
           </div>
           {myMigrations.length > 0 && (
-            <div className="flex items-center gap-1 mb-3 bg-slate-100/70 p-1 rounded-lg w-fit">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+              <KPICard title="Total migrations" value={myMigrations.length} icon={Briefcase} tone="navy" />
+              <KPICard title="En préparation" value={(groupedMigrations.find(g => g.key === 'stage-2')?.items.length) || 0} icon={Settings} tone="cobalt" />
+              <KPICard title="À planifier / copie" value={(groupedMigrations.find(g => g.key === 'stage-3')?.items.length) || 0} icon={Copy} tone="terracotta" />
+              <KPICard title="À finaliser" value={((groupedMigrations.find(g => g.key === 'stage-4')?.items.length) || 0) + ((groupedMigrations.find(g => g.key === 'stage-5')?.items.length) || 0)} icon={Send} tone="sage" />
+            </div>
+          )}
+          {myMigrations.length > 0 && (
+            <div className="flex items-center gap-1 mb-3 bg-[var(--color-surface-muted)] p-1 rounded-lg w-fit">
               <button
                 onClick={() => setUiThemeAndPersist('default')}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${uiTheme === 'default' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${uiTheme === 'default' ? 'bg-[var(--color-surface)] text-[var(--color-text)] shadow-[0_4px_16px_rgba(11,37,69,0.04)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text)]'}`}
               >
                 Thème par défaut
               </button>
               <button
                 onClick={() => setUiThemeAndPersist('aurora-light')}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${uiTheme === 'aurora-light' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${uiTheme === 'aurora-light' ? 'bg-[var(--color-surface)] text-[var(--color-text)] shadow-[0_4px_16px_rgba(11,37,69,0.04)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text)]'}`}
               >
                 Thème Secib clair
               </button>
               <button
                 onClick={() => setUiThemeAndPersist('aurora-dark')}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${uiTheme === 'aurora-dark' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${uiTheme === 'aurora-dark' ? 'bg-[var(--color-surface)] text-[var(--color-text)] shadow-[0_4px_16px_rgba(11,37,69,0.04)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text)]'}`}
               >
                 Thème Secib sombre
               </button>
             </div>
           )}
           {myMigrations.length > 0 && (
-            <div className="flex items-center gap-1 mb-3 bg-slate-100/70 p-1 rounded-lg w-fit">
+            <div className="flex items-center gap-1 mb-3 bg-[var(--color-surface-muted)] p-1 rounded-lg w-fit">
               <button
                 onClick={() => setMigrationDisplayMode('grouped')}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${migrationDisplayMode === 'grouped' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${migrationDisplayMode === 'grouped' ? 'bg-[var(--color-surface)] text-[var(--color-text)] shadow-[0_4px_16px_rgba(11,37,69,0.04)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text)]'}`}
               >
                 Vue par étape
               </button>
               <button
                 onClick={() => setMigrationDisplayMode('list')}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${migrationDisplayMode === 'list' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${migrationDisplayMode === 'list' ? 'bg-[var(--color-surface)] text-[var(--color-text)] shadow-[0_4px_16px_rgba(11,37,69,0.04)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text)]'}`}
               >
                 Vue liste
               </button>
@@ -2230,11 +2387,11 @@ function MigrationDashboard() {
           {myMigrations.length > 0 && (
             <div className="flex items-center gap-2 mb-3 flex-wrap">
               <div className="relative">
-                <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400 pointer-events-none" />
+                <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-[var(--color-text-secondary)] pointer-events-none" />
                 <select
                   value={migrationStageFilter || ''}
                   onChange={(e) => setMigrationStageFilter(e.target.value ? Number(e.target.value) : null)}
-                  className="pl-7 pr-3 py-1.5 text-xs bg-white border border-slate-200 text-slate-700 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                  className="pl-7 pr-3 py-1.5 text-xs bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] rounded-md focus:outline-none focus:ring-1 focus:ring-[var(--color-cobalt)] cursor-pointer"
                 >
                   <option value="">Toutes les étapes</option>
                   {MIGRATION_STAGES.map((s, i) => (<option key={s.key} value={i + 1}>{s.label}</option>))}
@@ -2243,7 +2400,7 @@ function MigrationDashboard() {
               {migrationDisplayMode === 'list' && (
                 <button
                   onClick={() => setMigrationSortDir(d => d === 'asc' ? 'desc' : 'asc')}
-                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs bg-white border border-slate-200 text-slate-600 rounded-md hover:bg-slate-50 transition-colors"
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-secondary)] rounded-md hover:bg-[var(--color-surface-muted)] transition-colors"
                   title="Inverser l'ordre de tri par étape"
                 >
                   {migrationSortDir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
@@ -2251,16 +2408,16 @@ function MigrationDashboard() {
                 </button>
               )}
               {migrationStageFilter && (
-                <span className="text-[11px] text-slate-400">{displayedMigrations.length} dossier{displayedMigrations.length > 1 ? 's' : ''}</span>
+                <span className="text-[11px] text-[var(--color-text-secondary)]">{displayedMigrations.length} dossier{displayedMigrations.length > 1 ? 's' : ''}</span>
               )}
             </div>
           )}
           {myMigrations.length === 0 ? (
-            <div className="bg-white p-8 rounded-xl border border-slate-200/80 text-center text-sm text-slate-400 italic">
+            <div className="bg-[var(--color-surface)] p-8 rounded-[10px] border border-[var(--color-border-soft)] text-center text-sm text-[var(--color-text-secondary)] italic">
               Aucun dossier actif trouvé pour le moment.
             </div>
           ) : displayedMigrations.length === 0 ? (
-            <div className="bg-white p-8 rounded-xl border border-slate-200/80 text-center text-sm text-slate-400 italic">
+            <div className="bg-[var(--color-surface)] p-8 rounded-[10px] border border-[var(--color-border-soft)] text-center text-sm text-[var(--color-text-secondary)] italic">
               Aucun dossier à cette étape.
             </div>
           ) : migrationDisplayMode === 'grouped' ? (
@@ -2286,11 +2443,19 @@ function MigrationDashboard() {
                     </div>
                   );
                 }
+                const tint = {
+                  'stage-1': { bg: 'bg-[var(--color-cobalt-soft)]', text: 'text-[var(--color-cobalt)]' },
+                  'stage-2': { bg: 'bg-[var(--color-cobalt-soft)]', text: 'text-[var(--color-cobalt)]' },
+                  'stage-3': { bg: 'bg-[var(--color-terracotta-soft)]', text: 'text-[var(--color-terracotta)]' },
+                  'stage-4': { bg: 'bg-[var(--color-sage-soft)]', text: 'text-[var(--color-sage)]' },
+                  'stage-5': { bg: 'bg-[var(--color-sage-soft)]', text: 'text-[var(--color-sage)]' },
+                  'alea': { bg: 'bg-[var(--color-terracotta-soft)]', text: 'text-[var(--color-terracotta)]' }
+                }[group.key] || { bg: 'bg-[var(--color-surface-muted)]', text: 'text-[var(--color-text-secondary)]' };
                 return (
-                  <div key={group.key} className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
-                    <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-                      <p className="text-xs font-bold text-slate-600">{group.label}</p>
-                      <span className="text-[10px] text-slate-400">{group.items.length}</span>
+                  <div key={group.key} className="bg-[var(--color-surface)] rounded-[10px] border border-[var(--color-border-soft)] shadow-[0_4px_16px_rgba(11,37,69,0.04)] overflow-hidden">
+                    <div className={`px-4 py-2 ${tint.bg} border-b border-[var(--color-border)] flex items-center justify-between`}>
+                      <p className={`text-xs font-bold ${tint.text}`}>{group.label}</p>
+                      <span className={`text-[10px] font-semibold ${tint.text}`}>{group.items.length}</span>
                     </div>
                     {group.items.map(m => (
                       <MigrationRow
@@ -2317,7 +2482,7 @@ function MigrationDashboard() {
               ))}
             </div>
           ) : (
-            <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
+            <div className="bg-[var(--color-surface)] rounded-[10px] border border-[var(--color-border-soft)] shadow-[0_4px_16px_rgba(11,37,69,0.04)] overflow-hidden">
               {displayedMigrations.map(m => (
                 <MigrationRow
                   key={m.numDossier}
@@ -2335,15 +2500,15 @@ function MigrationDashboard() {
         <div>
           <div className="mb-4 flex items-start justify-between gap-4 flex-wrap">
             <div>
-              <h2 className="text-base font-bold text-slate-800">Cabinets à relancer</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Tickets ouverts triés par priorité de relance (silence prolongé + relances déjà effectuées + statut "attente client"). Score interne, ajustable si besoin.
+              <h2 style={{ fontFamily: 'var(--font-heading)', fontSize: 22, fontWeight: 700, color: 'var(--color-text)' }}>Cabinets à relancer</h2>
+              <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">
+                Tickets ouverts triés par priorité de relance (silence prolongé + relances déjà effectuées + statut "attente client").
               </p>
             </div>
             {relanceSelection.size > 0 && (
               <button
                 onClick={() => copyRelancePrompt(relanceSelectedRows)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-[var(--color-cobalt)] text-white rounded-md hover:opacity-90 transition-colors"
               >
                 <Copy size={13} /> Copier le prompt ({relanceSelection.size})
               </button>
@@ -2351,32 +2516,33 @@ function MigrationDashboard() {
           </div>
           <div className="flex items-center gap-2 mb-3 flex-wrap">
             <div className="relative">
-              <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400 pointer-events-none" />
+              <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-[var(--color-text-secondary)] pointer-events-none" />
               <select
                 value={relanceTechFilter}
                 onChange={(e) => setRelanceTechFilter(e.target.value)}
-                className="pl-7 pr-3 py-1.5 text-xs bg-white border border-slate-200 text-slate-700 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                className="pl-7 pr-3 py-1.5 text-xs bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] rounded-md focus:outline-none focus:ring-1 focus:ring-[var(--color-cobalt)] cursor-pointer"
               >
                 <option value="Tous">Tous les techs</option>
                 {techList.map(tech => (<option key={tech} value={tech}>{tech}</option>))}
               </select>
             </div>
-            <div className="flex items-center gap-3 text-[10px] font-medium uppercase tracking-wider text-slate-500">
-              <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-300"></span> 1-2 relances</div>
-              <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-300"></span> +2 relances ou 60j+ sans MAJ</div>
+            <div className="flex items-center gap-3 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+              <div className="flex items-center gap-1.5"><span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-[var(--color-terracotta-soft)] text-[var(--color-terracotta)] border border-[var(--color-terracotta)]/20">À surveiller</span> 1-2 relances</div>
+              <div className="flex items-center gap-1.5"><span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-red-50 text-[var(--color-danger)] border border-red-100">Critique</span> +2 relances ou 60j+ sans MAJ</div>
             </div>
           </div>
           {filteredRelances.length === 0 ? (
-            <div className="bg-white p-8 rounded-xl border border-slate-200/80 text-center text-sm text-slate-400 italic">
+            <div className="bg-[var(--color-surface)] p-8 rounded-[10px] border border-[var(--color-border-soft)] text-center text-sm text-[var(--color-text-secondary)] italic">
               {isLoading ? "Chargement..." : "Aucun ticket à relancer sur ce filtre."}
             </div>
           ) : (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200/70 overflow-hidden">
+            <div className="bg-[var(--color-surface)] rounded-[10px] shadow-[0_4px_16px_rgba(11,37,69,0.04)] border border-[var(--color-border-soft)] overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="w-full text-xs text-left text-slate-600">
-                  <thead className="text-xs text-slate-500 uppercase bg-slate-50/50 border-b border-slate-100">
+                <table className="w-full text-xs text-left text-[var(--color-text-secondary)]">
+                  <thead className="text-xs text-[var(--color-text-secondary)] uppercase bg-[var(--color-surface-muted)] border-b border-[var(--color-border-soft)]">
                     <tr>
                       <th className="px-3 py-2 w-8"></th>
+                      <th className="px-3 py-2 font-semibold">Criticité</th>
                       <th className="px-3 py-2 font-semibold">Cabinet</th>
                       <th className="px-3 py-2 font-semibold">Contact</th>
                       <th className="px-3 py-2 font-semibold">Motif</th>
@@ -2387,9 +2553,16 @@ function MigrationDashboard() {
                       <th className="px-3 py-2 w-10"></th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredRelances.map((r) => (
-                      <tr key={r.TICKET_ID} className={`transition-colors ${relanceSelection.has(r.TICKET_ID) ? 'bg-blue-50/50' : getRelanceRowClass(r)}`}>
+                  <tbody className="divide-y divide-[var(--color-border-soft)]">
+                    {filteredRelances.map((r) => {
+                      const crit = getRelanceCriticite(r);
+                      const CritIcon = crit.icon;
+                      return (
+                      <tr
+                        key={r.TICKET_ID}
+                        className={`transition-colors hover:bg-[var(--color-surface-muted)] ${relanceSelection.has(r.TICKET_ID) ? 'bg-[var(--color-cobalt-soft)]/40' : ''}`}
+                        style={{ borderLeft: `3px solid ${crit.borderColor}` }}
+                      >
                         <td className="px-3 py-2">
                           <input
                             type="checkbox"
@@ -2398,26 +2571,32 @@ function MigrationDashboard() {
                             className="cursor-pointer"
                           />
                         </td>
-                        <td className="px-3 py-2 font-medium text-slate-800 whitespace-nowrap">{r.CABINET}</td>
-                        <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{r.CONTACT_CLIENT || '—'}</td>
-                        <td className="px-3 py-2 text-slate-600 max-w-[260px] truncate" title={r.MOTIF}>{r.MOTIF || '—'}</td>
-                        <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{r.TECHNICIEN || '—'}</td>
-                        <td className="px-3 py-2 text-right font-medium whitespace-nowrap">{r.JOURS_SANS_MAJ} j</td>
+                        <td className="px-3 py-2">
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase whitespace-nowrap ${crit.badgeClass}`}>
+                            <CritIcon size={11} /> {crit.label}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 font-medium text-[var(--color-text)] whitespace-nowrap">{r.CABINET}</td>
+                        <td className="px-3 py-2 text-[var(--color-text-secondary)] whitespace-nowrap">{r.CONTACT_CLIENT || '—'}</td>
+                        <td className="px-3 py-2 text-[var(--color-text-secondary)] max-w-[220px] truncate" title={r.MOTIF}>{r.MOTIF || '—'}</td>
+                        <td className="px-3 py-2 text-[var(--color-text-secondary)] whitespace-nowrap">{r.TECHNICIEN || '—'}</td>
+                        <td className="px-3 py-2 text-right font-medium text-[var(--color-text)] whitespace-nowrap">{r.JOURS_SANS_MAJ} j</td>
                         <td className="px-3 py-2 text-right whitespace-nowrap">{r.RELANCES || 0}</td>
                         <td className="px-3 py-2 text-center">
-                          {r.ATTENTE_CLIENT && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-50 text-amber-700 border border-amber-100">Oui</span>}
+                          {r.ATTENTE_CLIENT && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-[var(--color-terracotta-soft)] text-[var(--color-terracotta)] border border-[var(--color-terracotta)]/20">Oui</span>}
                         </td>
                         <td className="px-3 py-2">
                           <button
                             onClick={() => copyRelancePrompt([r])}
                             title="Copier le prompt de relance pour ce cabinet"
-                            className="text-slate-400 hover:text-blue-600 transition-colors"
+                            className="text-[var(--color-text-secondary)] hover:text-[var(--color-cobalt)] transition-colors"
                           >
                             <Copy size={14} />
                           </button>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -2436,6 +2615,7 @@ function MigrationDashboard() {
       />
 
       <Toast toast={toast} onClose={() => setToast(null)} />
+      </div>
     </div>
   );
 }
